@@ -1,0 +1,982 @@
+/*
+ * 基础样式与共用组件类，颜色一律取自 tokens.css。
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+/* 总览页有滚动条、项目/规则页内容短时没有。不留槽位的话，切页时页面宽度
+   会多出十几个像素，整页内容往右挪一下——看起来就是「切换后整体右跳」。
+   stable 始终保留那条槽，有滚动条和没滚动条时内容宽度一致。 */
+html {
+  scrollbar-gutter: stable;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: var(--t-body-md);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+
+a:hover {
+  border-bottom-color: var(--text);
+}
+
+/* 展示级字体只用在分数和页面标题上 */
+
+.display-lg {
+  font: var(--t-display-lg);
+  letter-spacing: var(--ls-display-lg);
+  color: var(--text);
+}
+
+.display-md {
+  font: var(--t-display-md);
+  letter-spacing: var(--ls-display-md);
+  color: var(--text);
+}
+
+.display-sm {
+  font: var(--t-display-sm);
+  letter-spacing: var(--ls-display-sm);
+  color: var(--text);
+}
+
+.display-xs {
+  font: var(--t-display-xs);
+  letter-spacing: var(--ls-display-xs);
+  color: var(--text);
+}
+
+.title-lg {
+  font: var(--t-title-lg);
+}
+.title-md {
+  font: var(--t-title-md);
+}
+.title-sm {
+  font: var(--t-title-sm);
+}
+
+.body-sm {
+  font: var(--t-body-sm);
+}
+
+.caption {
+  font: var(--t-caption);
+}
+
+/* 区块上方的小号大写标签 */
+.label {
+  font: var(--t-caption-up);
+  letter-spacing: var(--ls-caption-up);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+/* 各页共用的页头，总览页用自己的一套 */
+.page-head {
+  margin-bottom: var(--s-lg);
+}
+
+.page-title {
+  margin: 0 0 6px;
+  font: var(--t-display-md);
+  font-size: 32px;
+  letter-spacing: -0.8px;
+  color: var(--text);
+}
+
+.page-sub {
+  margin: 0;
+  font: var(--t-body-sm);
+  color: var(--text-muted);
+}
+
+/* 每个视图都用，写在某个视图的 scoped 样式里其余视图会落到浏览器默认值 */
+.section-title {
+  margin: 0 0 2px;
+  font: var(--t-title-md);
+  color: var(--text);
+}
+
+.section-sub {
+  margin: 0 0 var(--s-md);
+  font: var(--t-body-sm);
+  color: var(--text-muted);
+}
+
+/* 滚动渐现，由 reveal.ts 的 IntersectionObserver 加 .revealed 触发。
+   .is-down 表示元素是从上方离开视口的，回来时改为从上面落下。
+   --from 由 .is-down 改写，这里给出默认值。 */
+.reveal {
+  --from: 26px;
+  opacity: 0;
+  transform: translateY(var(--from));
+  transition: opacity 0.45s ease, transform 0.55s var(--ease-out);
+  transition-delay: 0ms;
+  /* 把布局与样式的影响限制在这个子树里，页面其它区块不必跟着重算 */
+  contain: layout style;
+}
+
+.reveal.is-down {
+  --from: -26px;
+}
+
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.7s var(--ease-out), transform 0.75s var(--ease-out);
+  transition-delay: 0ms;
+}
+
+/* transition 必须常驻在基础选择器上，只在 .revealed 里声明的话，
+   restartReveal 移除类的瞬间过渡属性也消失，元素直接跳回隐藏态，动画不会播放。
+   --i 是模板写入的序号，决定错峰顺序。 */
+.reveal .stagger-item {
+  --i: 0;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 0.35s var(--ease-out),
+    transform 0.4s var(--ease-out);
+}
+
+.reveal.revealed .stagger-item {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(120ms + var(--i) * 45ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal.revealed {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .reveal .stagger-item,
+  .reveal.revealed .stagger-item {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+.projectURL {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.soft {
+  color: var(--text-soft);
+}
+
+/* 全站只有一种卡片，悬停不上浮，交互反馈交给卡片海浪 */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--card-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.4s var(--ease-out);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+.card-soft {
+  background: var(--surface-card);
+  border: 1px solid transparent;
+  border-radius: var(--r-lg);
+}
+
+/* 卡片内嵌的浅色凹槽 */
+.card-cream {
+  background: var(--bg-sunken);
+  border-radius: var(--r-lg);
+}
+
+/* 卡片海浪，四层由 useCardWave 在指针进入时挂上。
+   位移和透明度走 WAAPI，这里不能加 transition，否则和 JS 动画打架。
+   宿主设 isolation，z-index 0 才会压在卡片背景之上、内容之下。
+   contain 把重绘范围钉在这张卡里，跑动画时不会波及整页。 */
+.card-wave-host {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  contain: layout paint;
+}
+
+.card-wave {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.card-wave > span {
+  position: absolute;
+  /* left/top 由 JS 写成指针坐标，translate 把圆心对准指针 */
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  /* 边缘刻意做成不规则圆，正圆看起来像聚光灯 */
+  border-radius: 46% 54% 52% 48% / 52% 46% 54% 48%;
+  opacity: 0;
+  visibility: hidden;
+  /* 不在静态样式里写 will-change：它会为每个层保留显卡内存，
+     页面上七张卡就是二十八个常驻层。播放期间由 JS 临时挂上 .is-running */
+}
+
+.card-wave > span.is-running {
+  will-change: transform, opacity;
+}
+
+.card-wave > span:nth-child(1) { background: var(--wave-1); }
+.card-wave > span:nth-child(2) { background: var(--wave-2); }
+.card-wave > span:nth-child(3) { background: var(--wave-3); }
+.card-wave > span:nth-child(4) { background: var(--surface); }
+
+.card-wave-host > *:not(.card-wave) {
+  position: relative;
+  z-index: 1;
+}
+
+/* 减少动效时不放海浪，改成悬停浅色高亮 */
+@media (prefers-reduced-motion: reduce) {
+  .card-wave { display: none; }
+  .card-wave-host:hover { background: var(--bg-sunken); }
+}
+
+/* 严重级别标签，大写是因为它是扫读的 */
+
+.sev {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  font: var(--t-caption);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sev-critical {
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical);
+}
+.sev-error {
+  background: var(--sev-error-bg);
+  color: var(--sev-error);
+}
+.sev-warning {
+  background: var(--sev-warning-bg);
+  color: var(--sev-warning);
+}
+.sev-info {
+  background: var(--sev-info-bg);
+  color: var(--sev-info);
+}
+
+/* 圆点形式，用在密集的行里，胶囊会显得嘈杂 */
+.sev-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.sev-dot.sev-critical {
+  background: var(--sev-critical);
+}
+.sev-dot.sev-error {
+  background: var(--sev-error);
+}
+.sev-dot.sev-warning {
+  background: var(--sev-warning);
+}
+.sev-dot.sev-info {
+  background: var(--sev-info);
+}
+
+/* 阈值与 Go 侧的 quality.Grade 一致，界面和 CLI 对同一个数字的解释不会打架 */
+
+.score-good {
+  color: var(--sev-ok);
+}
+.score-ok {
+  color: #65a30d;
+}
+.score-warn {
+  color: var(--sev-warning);
+}
+.score-bad {
+  color: var(--sev-critical);
+}
+
+/* 与 tokens.css 的三态一致：显式选择要单独写一份，原因见那个文件 */
+:root[data-theme='dark'] .score-ok {
+  color: #a3d977;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .score-ok {
+    color: #a3d977;
+  }
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  background: var(--surface-card);
+  color: var(--text);
+  font: var(--t-caption);
+}
+
+.rule-name {
+  font: var(--t-body-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+}
+
+/* 代码块，用于修复建议的前后对比 */
+.code-block {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0;
+  padding: var(--s-sm) var(--s-md);
+  border-radius: var(--r-md);
+}
+
+/* 滑块用偏冷的蓝灰：浅色画布上这点色温差才不会和背景融成一片
+   深色主题画布是中性近黑，同一个蓝会发花，单独换成中性白 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 128, 140, 0.35);
+  border-radius: var(--r-xs);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 128, 140, 0.55);
+  background-clip: content-box;
+}
+
+/* 浅色滑块放在深色轨道上对比度余量小，所以透明度调高 */
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  background-clip: content-box;
+}
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+  background-clip: content-box;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    background-clip: content-box;
+  }
+  :root:not([data-theme]) ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+    background-clip: content-box;
+  }
+}
+
+/* 主题切换走 View Transition，降级判断在 useTheme.ts。
+   改这里的动画参数会同时影响新旧两张快照，不要单独给其中一张加过渡。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  /* 默认的交叉淡化还会过渡尺寸和位置，快照会像在呼吸，这里只要淡入淡出 */
+  animation-duration: 0.26s;
+  animation-timing-function: ease;
+  /* normal 才是真正的交叉淡化，否则一张压着另一张，中间会短暂双重变暗 */
+  mix-blend-mode: normal;
+}
+
+/* 切换主题不改变任何位置，过渡期间锁住几何 */
+::view-transition-group(root) {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Element Plus 的颜色映射。
+   整组映射而不是逐组件打补丁，新增加的组件才会自动跟随主题。
+   这里只放变量，具体颜色由 tokens.css 按主题重写。 */
+:root {
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: var(--surface-card);
+  --el-color-primary-light-5: var(--surface-card);
+  --el-color-primary-light-7: var(--surface-card);
+  --el-color-primary-light-8: var(--surface-card);
+  --el-color-primary-light-9: var(--surface-card);
+  --el-color-primary-dark-2: var(--surface-card);
+
+  --el-border-radius-base: var(--r-md);
+  --el-border-radius-small: var(--r-sm);
+  --el-font-family: var(--font-body);
+
+  /* --- Surfaces ------------------------------------------------------- */
+  --el-bg-color: var(--surface);
+  --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: var(--surface);
+  --el-fill-color: var(--surface-card);
+  --el-fill-color-light: var(--surface-soft);
+  --el-fill-color-lighter: var(--surface-soft);
+  --el-fill-color-extra-light: var(--surface-soft);
+  --el-fill-color-dark: var(--surface-strong);
+  --el-fill-color-darker: var(--surface-strong);
+  --el-fill-color-blank: var(--surface);
+  --el-mask-color: color-mix(in srgb, var(--bg) 90%, transparent);
+
+  /* --- Text ----------------------------------------------------------- */
+  --el-text-color-primary: var(--text);
+  --el-text-color-regular: var(--text-body);
+  --el-text-color-secondary: var(--text-muted);
+  --el-text-color-placeholder: var(--text-soft);
+  --el-text-color-disabled: var(--text-soft);
+  --el-text-color-primary-disabled: var(--text-soft);
+
+  /* --- Borders -------------------------------------------------------- */
+  --el-border-color: var(--border);
+  --el-border-color-light: var(--border-soft);
+  --el-border-color-lighter: var(--border-soft);
+  --el-border-color-extra-light: var(--border-soft);
+  --el-border-color-hover: var(--text-muted);
+  --el-border-color-darker: var(--border);
+
+  /* 默认是 50% 白，那是给深色底按钮组用的，在这个浅色面板上看不出来，
+     split-button 的右半格会像缺了一条边 */
+  --el-button-divide-border-color: var(--border);
+
+  /* 填充元素上的文字色。库里假设底色是饱和中间色，这里的主色在浅色下接近黑、
+     深色下接近白，写死白色在深色主题会消失，所以绑到 on-accent */
+  --el-color-white: var(--on-accent);
+  --el-color-black: var(--text);
+
+  --el-disabled-bg-color: var(--surface-soft);
+  --el-disabled-text-color: var(--text-soft);
+  --el-disabled-border-color: var(--border-soft);
+
+  /* 必须映射整条色阶。只设基础色的话，变体背景仍来自 -light-9 那档写死的浅色，
+     深色主题下会出现浅底浅字。
+     -light-9 是填充背景，-light-8 是边框，中间几档用于 hover/active。 */
+  --el-color-success: var(--sev-ok);
+  --el-color-success-light-3: var(--sev-ok);
+  --el-color-success-light-5: var(--sev-ok);
+  --el-color-success-light-7: var(--sev-ok-bg);
+  --el-color-success-light-8: var(--sev-ok-bg);
+  --el-color-success-light-9: var(--sev-ok-bg);
+
+  --el-color-warning: var(--sev-warning);
+  --el-color-warning-light-3: var(--sev-warning);
+  --el-color-warning-light-5: var(--sev-warning);
+  --el-color-warning-light-7: var(--sev-warning-bg);
+  --el-color-warning-light-8: var(--sev-warning-bg);
+  --el-color-warning-light-9: var(--sev-warning-bg);
+
+  --el-color-danger: var(--sev-critical);
+  --el-color-danger-light-3: var(--sev-critical);
+  --el-color-danger-light-5: var(--sev-critical);
+  --el-color-danger-light-7: var(--sev-critical-bg);
+  --el-color-danger-light-8: var(--sev-critical-bg);
+  --el-color-danger-light-9: var(--sev-critical-bg);
+
+  --el-color-error: var(--sev-critical);
+  --el-color-error-light-3: var(--sev-critical);
+  --el-color-error-light-5: var(--sev-critical);
+  --el-color-error-light-7: var(--sev-critical-bg);
+  --el-color-error-light-8: var(--sev-critical-bg);
+  --el-color-error-light-9: var(--sev-critical-bg);
+
+  --el-color-info: var(--sev-info);
+  --el-color-info-light-3: var(--sev-info);
+  --el-color-info-light-5: var(--sev-info);
+  --el-color-info-light-7: var(--sev-info-bg);
+  --el-color-info-light-8: var(--sev-info-bg);
+  --el-color-info-light-9: var(--sev-info-bg);
+}
+
+/* 分页当前页的底色是 accent 填充，文字得用 on-accent，不能用库里写死的白 */
+.el-pager li.is-active {
+  color: var(--on-accent);
+}
+
+.el-button {
+  font-weight: 600;
+}
+
+/* 主按钮悬停时碳酸汽水从左涌过来，画布由 useSodaFill.ts 驱动
+   文字和图标要压在填充层之上，Element Plus 把图标和文字 span 放在同一层级，
+   只给 span 设 z-index 会漏掉图标，所以统一处理按钮的直接子元素 */
+.el-button--primary {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: var(--text);
+  --el-button-hover-bg-color: transparent;
+  --el-button-hover-border-color: var(--text);
+  --el-button-text-color: var(--text);
+  --el-button-hover-text-color: var(--on-accent);
+  --el-button-active-bg-color: var(--text);
+  --el-button-active-border-color: var(--text);
+  --el-button-active-text-color: var(--on-accent);
+
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+  border-color: var(--text);
+  transition:
+    color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out);
+}
+
+/* 填充层是一张 canvas，由 useSodaFill.ts 挂在按钮最前面
+   inset: 0 让画布贴合按钮圆角，按钮自身的 overflow: hidden 负责裁切 */
+.el-button--primary .soda-fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.el-button--primary .soda-fill canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 图标、文字 span 及其它直接子元素都压到填充层之上
+   Element Plus 把图标和文字放在同一层级，只给 span 设 z-index 会漏掉图标 */
+.el-button--primary > *:not(.soda-fill) {
+  position: relative;
+  z-index: 1;
+}
+
+.el-button--primary:hover,
+.el-button--primary:focus-visible {
+  background: transparent;
+  color: var(--on-accent);
+  border-color: var(--text);
+}
+
+/* 禁用和 loading 保持库里的灰色处理，填充层不能盖上去 */
+.el-button--primary.is-disabled,
+.el-button--primary.is-loading {
+  --el-button-hover-bg-color: transparent;
+  --el-button-hover-border-color: var(--el-disabled-border-color);
+  --el-button-hover-text-color: var(--el-disabled-text-color);
+  background: transparent;
+  color: var(--el-disabled-text-color);
+  border-color: var(--el-disabled-border-color);
+}
+
+/* 禁用和 loading 时把画布藏掉。元素本身拿不到 hover，动画不会启动，
+   这里只保证它不盖住库自己的灰色背景 */
+.el-button--primary.is-disabled .soda-fill,
+.el-button--primary.is-loading .soda-fill {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .el-button--primary .soda-fill {
+    display: none;
+  }
+  .el-button--primary:hover,
+  .el-button--primary:focus-visible,
+  .el-button--primary:active {
+    background: var(--text);
+    color: var(--on-accent);
+  }
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 1px var(--border) inset;
+  background: var(--surface);
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--text) inset;
+}
+
+.el-table {
+  --el-table-border-color: var(--border);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: transparent;
+  /* 行不铺 hover 底色，背景色的唯一来源是卡片海浪，
+     再叠一层灰会留下一块对不上的色块 */
+  --el-table-row-hover-bg-color: transparent;
+  background: transparent;
+}
+
+/* 表格行 hover：抽屉抽出。行不铺底色，靠上下各一条细线和首格的墨色把手，
+   内容整体右移 6px */
+.el-table .cell {
+  /* 位移必须用 padding。transform 会把绘制盒推出单元格，
+     el-table 按内容测量内部容器，最右一列每次行 hover 都会冒出横向滚动条。 */
+  transition: padding 0.45s var(--ease-out);
+}
+
+.el-table tbody tr td.el-table__cell {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+  font-size: 13.5px;
+  transition: box-shadow 0.25s var(--ease-out);
+}
+
+.el-table tbody tr:hover td.el-table__cell {
+  box-shadow: 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+
+.el-table tbody tr:hover td.el-table__cell:first-child {
+  box-shadow: inset 2px 0 0 var(--text), 0 1px 0 var(--border), 0 -1px 0 var(--border);
+}
+
+/* 位移是左多 6px、右少 6px，文字右滑而单元格总宽不变。
+   数字写死，因为两张表都用 size="small"，基础内边距是 8px。 */
+.el-table tbody tr:hover .cell {
+  padding-left: 14px;
+  padding-right: 2px;
+}
+
+/* 面板里的首末列从 22px 起步，hover 位移要相对它算，
+   否则首末列会在悬停时往内跳 */
+.table-card.el-table tbody tr:hover td.el-table__cell:first-child .cell {
+  padding-left: 28px;
+}
+
+.table-card.el-table tbody tr:hover td.el-table__cell:last-child .cell {
+  padding-right: 16px;
+}
+
+.el-table tbody tr:last-child td.el-table__cell {
+  border-bottom-color: transparent;
+}
+
+.el-table th.el-table__cell {
+  font: var(--t-caption-up);
+  letter-spacing: var(--ls-caption-up);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* 数字列在视图里单独设为左对齐，这里不做全局覆盖，
+   否则会把操作按钮列一并推到右边 */
+
+/* 表格自成一块面板，刻意不用 .card：卡片海浪的宿主会裁掉 overflow，
+   el-table 需要自己的滚动和固定表头。
+   外层不能加左右内边距——el-table 的内部容器按父级 100% 布局，
+   加了只会把整块面板撑出容器，冒出横向滚动条。留白由首末列的单元格提供 */
+.table-card {
+  background: var(--surface);
+  border: 1px solid var(--card-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--s-sm) 0;
+  overflow: hidden;
+}
+
+/* 首末列内容往里缩，面板边缘才不会贴着文字。
+   选择器是 .table-card.el-table 而不是后代选择器：这个类加在 <el-table> 元素自己身上，
+   两者是同一个节点，后代选择器匹配不到 */
+.table-card.el-table th.el-table__cell:first-child .cell,
+.table-card.el-table td.el-table__cell:first-child .cell {
+  padding-left: 22px;
+}
+
+.table-card.el-table th.el-table__cell:last-child .cell,
+.table-card.el-table td.el-table__cell:last-child .cell {
+  padding-right: 22px;
+}
+
+.table-card.el-table .el-table__inner-wrapper::before {
+  display: none;
+}
+
+.el-tag {
+  border-radius: var(--r-pill);
+}
+
+/* 提示条用普通 <aside>，不改 el-alert，库里的 is-* 背景规则才不用一层层覆盖。
+   颜色只放在左侧竖线和图标上。 */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-sm);
+  padding: var(--s-sm) var(--s-md) var(--s-sm) var(--s-md);
+  border-left: 3px solid var(--border);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: var(--bg-sunken);
+  margin: 0;
+}
+
+.notice-info {
+  border-left-color: var(--sev-info);
+}
+.notice-warn {
+  border-left-color: var(--sev-warning);
+}
+.notice-danger {
+  border-left-color: var(--sev-critical);
+}
+
+.notice-mark {
+  flex: 0 0 auto;
+  display: flex;
+  margin-top: 1px;
+}
+
+.notice-info .notice-mark {
+  color: var(--sev-info);
+}
+.notice-warn .notice-mark {
+  color: var(--sev-warning);
+}
+.notice-danger .notice-mark {
+  color: var(--sev-critical);
+}
+
+.notice-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.notice-title {
+  margin: 0;
+  font: var(--t-title-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.notice-text {
+  margin: 2px 0 0;
+  font: var(--t-body-sm);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+/* 操作列的按钮不能换行：Element Plus 给相邻按钮 12px 左边距，
+   单元格一窄就换行，换行后第二个按钮仍带着这段边距，看起来和第一个错开 */
+.el-table td .cell > .el-button + .el-button {
+  margin-left: 4px;
+}
+
+.el-table td .cell:has(> .el-button) {
+  white-space: nowrap;
+}
+
+.el-tabs__item {
+  font: var(--t-nav);
+}
+
+.el-drawer,
+.el-dialog {
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+/* 弹窗贴着顶部，默认的 margin: 15vh 在高屏上会白占掉五分之一的视口，
+   而项目、规则这两个长表单正缺竖直空间，按钮会被挤到折叠线以下 */
+.el-dialog {
+  --el-dialog-margin-top: 6vh;
+  /* 超出视口时内部滚动，内容再长也能摸到页脚 */
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 只有主体滚动，头和脚固定 */
+.el-dialog__body {
+  overflow-y: auto;
+}
+
+/* 矮弹窗单独定位：6vh 是给长表单定的，
+   只有两三行内容的弹窗贴着顶会像从上面掉下来 */
+.el-dialog.dialog-centered {
+  --el-dialog-margin-top: 26vh;
+  max-height: none;
+}
+
+.el-drawer {
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+}
+
+/* Popper 渲染在 body 下的传送门里，处在页面层叠上下文之外，要自带底色和边框 */
+.el-popper.is-dark {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.el-popper.is-dark .el-popper__arrow::before {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.el-select-dropdown__item.is-selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.el-select-dropdown__item.is-hovering {
+  background: var(--surface-soft);
+}
+
+/* 分页按钮的底色已由上面的映射处理，这里只对齐形状 */
+.el-pagination.is-background .el-pager li,
+.el-pagination .el-pager li {
+  border-radius: var(--r-sm);
+}
+
+.el-pagination {
+  --el-pagination-button-bg-color: var(--surface-card);
+  --el-pagination-hover-color: var(--text);
+  --el-pagination-button-disabled-bg-color: var(--surface-soft);
+}
+
+/* 开关的关闭态是一条实心轨道，不给 token 的话深色主题下是浅灰，看起来像「开」 */
+.el-switch {
+  margin-right: 10px;
+  --el-switch-off-color: var(--surface-strong);
+  --el-switch-on-color: var(--accent);
+}
+
+/* 复选框和单选框的填充默认是写死的白色。
+   边框必须用 --text-muted，不能换成 --border：后者对比度只有 1.21:1，等于不可见，
+   而勾选列是批量删除的唯一入口，控件得先看得见才能用。 */
+.el-checkbox__inner,
+.el-radio__inner {
+  background-color: var(--surface);
+  border-color: var(--text-muted);
+}
+
+/* 表格里的复选框放大到 16px，默认尺寸低于指针目标。
+   只改尺寸，对勾是旋转的边框，位置由 translate 居中，改偏移反而会偏。 */
+.el-table .el-checkbox__inner {
+  width: 16px;
+  height: 16px;
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-radio__input.is-checked .el-radio__inner {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner::after {
+  border-color: var(--on-accent);
+}
+
+.el-radio__input.is-checked .el-radio__inner::after {
+  background-color: var(--on-accent);
+}
+
+/* 主题切换器用的分段单选按钮 */
+.el-radio-button__inner {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-body);
+}
+
+.el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  box-shadow: -1px 0 0 0 var(--accent);
+}
+
+/* 数字输入的加减按钮 */
+.el-input-number__decrease,
+.el-input-number__increase {
+  background: var(--surface-card);
+  border-color: var(--border);
+  color: var(--text-body);
+}
+
+/* 筛选框和分段控件的 hover 态，库里写死了浅色 */
+.el-select__wrapper.is-hovering:not(.is-focused) {
+  box-shadow: 0 0 0 1px var(--text-muted) inset;
+}
+
+/* 空状态插画是九层灰拼的 SVG，默认按白底调好，深色主题下会糊成一片亮斑。
+   改用逐级变浅的表面色，不改动插画本身 */
+.el-empty {
+  --el-empty-fill-color-0: var(--surface);
+  --el-empty-fill-color-1: var(--surface-soft);
+  --el-empty-fill-color-2: var(--surface-soft);
+  --el-empty-fill-color-3: var(--surface-card);
+  --el-empty-fill-color-4: var(--surface-card);
+  --el-empty-fill-color-5: var(--surface-strong);
+  --el-empty-fill-color-6: var(--surface-strong);
+  --el-empty-fill-color-7: var(--border-soft);
+  --el-empty-fill-color-8: var(--border);
+  --el-empty-fill-color-9: var(--border);
+}
+
+/* 取色器的透明底棋盘默认是不透明浅灰，深色主题下色块看起来不对 */
+.el-color-picker {
+  --el-color-picker-alpha-bg-a: var(--surface-strong);
+  --el-color-picker-alpha-bg-b: var(--surface-card);
+}

@@ -1,0 +1,155 @@
+# Fizzra CI workflow.
+#
+# Runs a scan on every push and pull request, uploads the SARIF report so
+# findings appear as inline annotations on the PR diff, and fails the job when
+# the quality gate is not met.
+
+name: Code quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      with-analyzers:
+        description: 'Extra analyzer toolchains to install: go, js, python, rust, java, csharp, cpp, php, or "all"'
+        default: go
+        type: string
+
+permissions:
+  contents: read
+  # Required by the SARIF upload step.
+  security-events: write
+
+jobs:
+  fizzra:
+    name: Fizzra
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Must be at least what go.mod declares, or the build fails outright.
+          go-version: '1.27.3'
+          cache: true
+
+      # Optional: install the external analyzers you want. Anything missing is
+      # reported as "skipped" rather than failing the build, so this step is
+      # purely about coverage.
+      #
+      # The first block is the Go toolchain; the second block installs the other
+      # languages' tools, gated on the `with-analyzers` setting. The gate matches
+      # whole words, so `js` does not also pull in `java`. See
+      # deploy/README.md for the full language -> tool -> install matrix.
+      - name: Install Go analyzers
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install other analyzers
+        if: contains(inputs.with-analyzers || 'go', 'js') || contains(inputs.with-analyzers || 'go', 'python') || contains(inputs.with-analyzers || 'go', 'rust') || contains(inputs.with-analyzers || 'go', 'java') || contains(inputs.with-analyzers || 'go', 'csharp') || contains(inputs.with-analyzers || 'go', 'cpp') || contains(inputs.with-analyzers || 'go', 'php') || contains(inputs.with-analyzers || 'go', 'all')
+        run: |
+          sel=" ${{ inputs.with-analyzers || 'go' }} "
+          want() { [[ "$sel" == *" $1 "* || "$sel" == *" all "* ]]; }
+
+          # JavaScript / TypeScript (oxlint, biome, ts/tsc)
+          if want js; then
+            npm i -g oxlint @biomejs/biome typescript
+          fi
+          # Python (ruff). Also on PATH via pip's script dir.
+          if want python; then
+            pip install ruff
+          fi
+          # Rust (clippy, rustfmt, cargo-audit)
+          if want rust; then
+            rustup component add clippy rustfmt
+            cargo install cargo-audit
+          fi
+          # Java (pmd, spotbugs). Both ship as zip bundles, not apt packages on
+          # the runner image, so fetch the latest release asset from the
+          # project's own repository, the same page the analyzer points at.
+          if want java; then
+            pmd_ver=$(curl -fsSL https://api.github.com/repos/pmd/pmd/releases/latest | jq -r '.tag_name | sub("pmd_releases/"; "")')
+            curl -fsSL -o /tmp/pmd.zip "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${pmd_ver}/pmd-dist-${pmd_ver}-bin.zip"
+            unzip -q /tmp/pmd.zip -d /opt && ln -sf /opt/pmd-bin-${pmd_ver}/bin/pmd /usr/local/bin/pmd
+            sp_ver=$(curl -fsSL https://api.github.com/repos/spotbugs/spotbugs/releases/latest | jq -r '.tag_name')
+            curl -fsSL -o /tmp/spotbugs.tgz "https://github.com/spotbugs/spotbugs/releases/download/${sp_ver}/spotbugs-${sp_ver}.tgz"
+            tar xzf /tmp/spotbugs.tgz -C /opt && ln -sf /opt/spotbugs-${sp_ver}/bin/spotbugs /usr/local/bin/spotbugs
+          fi
+          # C# (roslynator)
+          if want csharp; then
+            dotnet tool install --global Roslynator.DotNet.Cli
+            echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          fi
+          # C/C++ (cppcheck, clang-tidy). clang-tidy is the expensive one: apt
+          # pulls in several hundred MB.
+          if want cpp; then
+            sudo apt-get update
+            sudo apt-get install -y cppcheck clang-tidy
+          fi
+          # PHP (phpstan). The phar is a single file that works without
+          # composer, which is what the analyzer probes for.
+          if want php; then
+            sudo apt-get install -y php-cli
+            curl -fsSL -o /usr/local/bin/phpstan.phar "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"
+            chmod +x /usr/local/bin/phpstan.phar
+          fi
+
+      # This project ships the tool it uses: build Fizzra from source.
+      # In another repository, replace this with the install method you prefer.
+      - name: Build Fizzra
+        run: go build -o "$RUNNER_TEMP/fizzra" ./backend/cmd/fizzra
+
+      # A coverage profile makes the coverage dimension meaningful. Skip this
+      # step if you do not want it; the gate treats missing coverage as "not
+      # measured" rather than "zero".
+      #
+      # This repository does not publish its test files, so here the step finds
+      # nothing and produces an empty profile. In your own project it does the
+      # usual thing.
+      - name: Test with coverage
+        run: go test -coverprofile=coverage.out ./...
+        continue-on-error: true
+
+      - name: Scan
+        id: scan
+        run: |
+          "$RUNNER_TEMP/fizzra" ci . \
+            --format sarif \
+            --output fizzra.sarif \
+            --fail-on critical,error
+        continue-on-error: true
+
+      # Upload before failing: a SARIF report is most useful precisely when the
+      # gate fails.
+      - name: Upload SARIF
+        if: always() && hashFiles('fizzra.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: fizzra.sarif
+          category: fizzra
+
+      - name: Upload HTML report
+        if: always()
+        run: |
+          "$RUNNER_TEMP/fizzra" report . --format html --output fizzra-report.html
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('fizzra-report.html') != ''
+        with:
+          name: fizzra-report
+          path: fizzra-report.html
+          retention-days: 14
+
+      - name: Enforce the quality gate
+        if: steps.scan.outcome == 'failure'
+        run: |
+          echo "::error::Fizzra quality gate failed. See the annotations above."
+          exit 1

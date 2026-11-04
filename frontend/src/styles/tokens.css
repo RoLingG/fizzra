@@ -1,0 +1,273 @@
+/*
+ * 设计 token，单色方案。
+ *
+ * 组件引用的是语义名（--bg、--surface、--text、--sev-* 等），
+ * 换配色只改这一个文件，不必动组件标记。
+ */
+
+:root {
+  /* 白色画布与卡片，层次靠描边和投影，不靠给页面染色。
+     sunken 是卡片内嵌的浅色凹槽。 */
+  --bg: #ffffff;
+  --bg-sunken: #fafafa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+
+  /* text 用于标题和名称，body 用于表格正文，两个 muted 档用于标签、时间与占位符 */
+  --text: #000000;
+  --text-body: #2e2e2e;
+  --text-muted: #6e6e6e;
+  --text-soft: #9b9b9b;
+
+  /* card-line 比 border 深一档，白卡在白底上才有轮廓 */
+  --border: #ededed;
+  --border-soft: #f4f4f4;
+  --card-line: #e3e3e3;
+  --line-strong: #dcdcdc;
+
+  /* 旧配方的别名，组件直接引用了这几个名字，保留下来避免逐个改写 */
+  --surface-card: #f2f2f2;
+  --surface-soft: var(--bg-sunken);
+  --surface-strong: #ededed;
+
+  /* shadow-* 是弹层用的一般阶梯，shadow-raised* 是卡片静止与悬停时的投影。
+     卡片悬停不上浮，交互感由投影加深和卡片海浪承担。 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -8px rgba(0, 0, 0, 0.1);
+  --shadow-raised-hover: 0 2px 4px rgba(0, 0, 0, 0.05), 0 16px 36px -12px rgba(0, 0, 0, 0.16);
+  --shadow-pop: 0 6px 24px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-header: 0 1px 0 var(--border);
+
+  /* 页面上唯一的填充色，单色方案下就是墨与纸这一对 */
+  --accent: #000000;
+  --on-accent: #ffffff;
+  /* 不随主题翻转的两端 */
+  --ink-solid: #000000;
+  --bg-solid: #ffffff;
+
+  /* 状态色是页面里唯一出现的颜色，按白底上的对比度挑选，不追求饱和度 */
+  --ok: #0d7a3e;
+  --ok-bg: #eefaf3;
+  --warn: #c2900a;
+  --warn-bg: #fff8e3;
+  --danger: #b42318;
+  --danger-bg: #fef3f2;
+  --info: #1d4ed8;
+  --info-bg: #eff4ff;
+
+  /* 组件引用的是 --sev-*，这里映射到上面那组语义色 */
+  --sev-critical: var(--danger);
+  --sev-critical-bg: var(--danger-bg);
+  --sev-error: var(--danger);
+  --sev-error-bg: var(--danger-bg);
+  --sev-warning: var(--warn);
+  --sev-warning-bg: var(--warn-bg);
+  --sev-info: var(--info);
+  --sev-info-bg: var(--info-bg);
+  --sev-ok: var(--ok);
+  --sev-ok-bg: var(--ok-bg);
+
+  /* 卡片海浪的三层灰，由深到浅，叠在一起不会偏色 */
+  --wave-1: #bdbdbd;
+  --wave-2: #d4d4d4;
+  --wave-3: #e8e8e8;
+  --wave-card-fill: #f5f5f5;
+
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 22px;
+  --r-xl: 26px;
+  --r-pill: 9999px;
+
+  --s-xxs: 4px;
+  --s-xs: 8px;
+  --s-sm: 12px;
+  --s-md: 16px;
+  --s-lg: 24px;
+  --s-xl: 32px;
+  --s-xxl: 48px;
+  --s-section: 96px;
+
+  /* 系统字体栈，同一行里中英文由同一个字族渲染，字重不会跳。
+     font-mono 只用于字面量（路径、命令、指纹、正则），表格第一列不用它 */
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-display: var(--font-body);
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --t-display-lg: 500 56px/1.05 var(--font-display);
+  --t-display-md: 500 40px/1.1 var(--font-display);
+  --t-display-sm: 500 32px/1.15 var(--font-display);
+  --t-display-xs: 500 26px/1.2 var(--font-display);
+  --t-title-lg: 620 18px/1.3 var(--font-body);
+  --t-title-md: 620 15px/1.4 var(--font-body);
+  --t-title-sm: 620 14px/1.4 var(--font-body);
+  --t-body-md: 400 14px/1.6 var(--font-body);
+  --t-body-sm: 400 13px/1.55 var(--font-body);
+  --t-caption: 500 12px/1.4 var(--font-body);
+  --t-caption-up: 600 11px/1.4 var(--font-body);
+  --t-button: 600 13.5px/1 var(--font-body);
+  --t-nav: 500 14px/1.4 var(--font-body);
+
+  /* 大号数字和页面标题用负字距 */
+  --ls-display-lg: -2px;
+  --ls-display-md: -1.2px;
+  --ls-display-sm: -0.8px;
+  --ls-display-xs: -0.4px;
+  --ls-caption-up: 0.06em;
+
+  /* ease-soft 带轻微回弹，只用于位移，不用于颜色 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/*
+ * 主题三态：
+ *
+ *   1. [data-theme='dark']  用户显式选择深色
+ *   2. [data-theme='light'] 用户显式选择浅色
+ *   3. 没有属性             跟随系统
+ *
+ * 第 2 种必须把第 3 种覆盖的所有别名重写一遍，否则深色系统上选了浅色的用户
+ * 会落到媒体查询里，又变回深色。
+ */
+
+/* 显式选择写在前面，后面的媒体查询块才不会靠顺序压过它 */
+:root[data-theme='dark'] {
+  --bg: #000000;
+  --bg-sunken: #0a0a0a;
+  --surface: #0e0e0e;
+  --surface-raised: #161616;
+
+  --text: #ffffff;
+  --text-body: #c8c8c8;
+  --text-muted: #8f8f8f;
+  --text-soft: #6a6a6a;
+
+  --border: #1e1e1e;
+  --border-soft: #161616;
+  --card-line: #2a2a2a;
+  --line-strong: #2e2e2e;
+
+  --surface-card: #161616;
+  --surface-soft: var(--bg-sunken);
+  --surface-strong: #202020;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.7);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.6), 0 10px 30px -10px rgba(0, 0, 0, 0.8);
+  --shadow-raised-hover: 0 2px 6px rgba(0, 0, 0, 0.6), 0 18px 44px -12px rgba(0, 0, 0, 0.9);
+  --shadow-pop: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --shadow-header: 0 1px 0 var(--border);
+
+  --accent: #ffffff;
+  --on-accent: #000000;
+
+  --ok: #4ade80;
+  --ok-bg: #0d1f14;
+  --warn: #fbbf24;
+  --warn-bg: #231a05;
+  --danger: #f87171;
+  --danger-bg: #2a0f0f;
+  --info: #93b4ff;
+  --info-bg: #101a2e;
+
+  --wave-1: #424242;
+  --wave-2: #2b2b2b;
+  --wave-3: #1c1c1c;
+  --wave-card-fill: #181818;
+}
+
+/* 深色系统上选择浅色时，这份要压过媒体查询 */
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-sunken: #fafafa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+
+  --text: #000000;
+  --text-body: #2e2e2e;
+  --text-muted: #6e6e6e;
+  --text-soft: #9b9b9b;
+
+  --border: #ededed;
+  --border-soft: #f4f4f4;
+  --card-line: #e3e3e3;
+  --line-strong: #dcdcdc;
+
+  --accent: #000000;
+  --on-accent: #ffffff;
+
+  --wave-1: #bdbdbd;
+  --wave-2: #d4d4d4;
+  --wave-3: #e8e8e8;
+  --wave-card-fill: #f5f5f5;
+}
+
+/* 没有显式选择时跟随系统 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #000000;
+    --bg-sunken: #0a0a0a;
+    --surface: #0e0e0e;
+    --surface-raised: #161616;
+
+    --text: #ffffff;
+    --text-body: #c8c8c8;
+    --text-muted: #8f8f8f;
+    --text-soft: #6a6a6a;
+
+    --border: #1e1e1e;
+    --border-soft: #161616;
+    --card-line: #2a2a2a;
+    --line-strong: #2e2e2e;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.7);
+    --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.6), 0 10px 30px -10px rgba(0, 0, 0, 0.8);
+    --shadow-raised-hover: 0 2px 6px rgba(0, 0, 0, 0.6), 0 18px 44px -12px rgba(0, 0, 0, 0.9);
+    --shadow-pop: 0 6px 24px rgba(0, 0, 0, 0.5);
+    --shadow-header: 0 1px 0 var(--border);
+
+    --accent: #ffffff;
+    --on-accent: #000000;
+
+    --ok: #4ade80;
+    --ok-bg: #0d1f14;
+    --warn: #fbbf24;
+    --warn-bg: #231a05;
+    --danger: #f87171;
+    --danger-bg: #2a0f0f;
+    --info: #93b4ff;
+    --info-bg: #101a2e;
+
+    --wave-1: #424242;
+    --wave-2: #2b2b2b;
+    --wave-3: #1c1c1c;
+    --wave-card-fill: #181818;
+  }
+}
+
+/*
+ * color-scheme 决定原生滚动条、表单控件和浏览器自身界面的配色。
+ * 同样要覆盖三态：用户一旦显式选择，<meta name="color-scheme"> 就不管用了，
+ * 只能在这里跟着改。
+ */
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+  }
+}

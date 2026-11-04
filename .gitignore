@@ -1,0 +1,55 @@
+# Build output
+/fizzra
+/fizzra.exe
+*.exe
+
+# Generated reports and coverage artefacts
+fizzra-report.html
+fizzra.sarif
+coverage.out
+coverage.txt
+cover.out
+
+# Local configuration (the example file is committed instead)
+/fizzra.yaml
+/fizzra.yml
+
+# Node
+node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-error.log*
+
+# The built dashboard, which is embedded into the Go binary.
+backend/internal/web/dist/
+
+# Scratch space, documentation and demos.
+/demo/
+/docs/
+
+# Tests are not part of the published tree
+*_test.go
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Screenshot scratch pads used while iterating on the UI
+/shotcheck/
+/.shot2/
+frontend/.preview/
+
+# Editor and OS noise
+.idea/
+.claude
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tool caches
+.ruff_cache/
+
+# Leftovers from running `npm install` in the repository root.
+/package.json
+/package-lock.json

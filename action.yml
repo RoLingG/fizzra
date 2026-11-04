@@ -1,0 +1,172 @@
+name: 'Fizzra'
+description: 'Scan a repository for code quality issues and fail the build when the quality gate is not met.'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Directory to scan, relative to the workspace root.'
+    required: false
+    default: '.'
+  analyzers:
+    description: 'Comma separated analyzer names to run. Empty runs everything applicable to the detected language.'
+    required: false
+    default: ''
+  fail-on:
+    description: 'Comma separated severities that fail the gate: critical, error, warning.'
+    required: false
+    default: 'critical,error'
+  min-score:
+    description: 'Override the minimum score. Empty uses the value from fizzra.yaml or the built-in default.'
+    required: false
+    default: ''
+  allow-skipped:
+    description: >-
+      Exit 0 when the only reason the scan is incomplete is that an analyzer's
+      tool is not installed. Analyzers that crashed or timed out still fail the
+      run. Defaults to false so a missing toolchain cannot silently pass.
+    required: false
+    default: 'false'
+  format:
+    description: 'Report format: sarif, json, html or text.'
+    required: false
+    default: 'sarif'
+  output:
+    description: >-
+      Report path. Defaults to fizzra.sarif for sarif, fizzra.json for json
+      and fizzra-report.html for html. Ignored for text.
+    required: false
+    default: ''
+  version:
+    description: >-
+      Fizzra release to download. Defaults to latest. Pin a tag in CI so an
+      upstream release cannot change your pipeline's behaviour overnight.
+    required: false
+    default: 'latest'
+  upload-sarif:
+    description: >-
+      Upload the SARIF report with codeql-action/upload-sarif so findings appear
+      as inline annotations. Requires the caller to grant security-events: write.
+    required: false
+    default: 'true'
+
+outputs:
+  score:
+    description: 'The overall score, 0-100.'
+    value: ${{ steps.scan.outputs.score }}
+  gate:
+    description: 'passed or failed.'
+    value: ${{ steps.scan.outputs.gate }}
+  report-path:
+    description: 'Where the report was written.'
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download Fizzra
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64)   asset=fizzra-linux-amd64 ;;
+          Windows-X64) asset=fizzra-windows-amd64.exe ;;
+          *)
+            echo "::error::Fizzra has no release for $RUNNER_OS-$RUNNER_ARCH. Build it from source or run it inside a container."
+            exit 1
+            ;;
+        esac
+
+        if [ "$INPUT_VERSION" = latest ]; then
+          url="${{ github.server_url }}/${{ github.action_repository }}/releases/latest/download/$asset"
+        else
+          url="${{ github.server_url }}/${{ github.action_repository }}/releases/download/$INPUT_VERSION/$asset"
+        fi
+
+        dest="$RUNNER_TEMP/fizzra/$asset"
+        mkdir -p "$(dirname "$dest")"
+        curl -fsSL --retry 3 -o "$dest" "$url"
+        chmod +x "$dest"
+        echo "$(dirname "$dest")" >> "$GITHUB_PATH"
+        # The Windows asset keeps its .exe suffix; name the command explicitly
+        # so later steps can call `fizzra` on both platforms.
+        if [ "$RUNNER_OS" = Windows ]; then
+          cp "$dest" "$(dirname "$dest")/fizzra.exe"
+        fi
+        echo "::group::fizzra version"
+        "$dest" version || true
+        echo "::endgroup::"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_ANALYZERS: ${{ inputs.analyzers }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_MIN_SCORE: ${{ inputs.min-score }}
+        INPUT_ALLOW_SKIPPED: ${{ inputs.allow-skipped }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+
+        args=(ci "$INPUT_PATH" --format "$INPUT_FORMAT")
+
+        case "$INPUT_FORMAT" in
+          sarif) default_out=fizzra.sarif ;;
+          json)  default_out=fizzra.json ;;
+          html)  default_out=fizzra-report.html ;;
+          text)  default_out= ;;
+        esac
+        out="${INPUT_OUTPUT:-$default_out}"
+        if [ -n "$out" ]; then
+          args+=(--output "$out")
+        fi
+
+        [ -n "$INPUT_ANALYZERS" ] && args+=(--analyzers "$INPUT_ANALYZERS")
+        [ -n "$INPUT_FAIL_ON" ] && args+=(--fail-on "$INPUT_FAIL_ON")
+        [ -n "$INPUT_MIN_SCORE" ] && args+=(--min-score "$INPUT_MIN_SCORE")
+        [ "$INPUT_ALLOW_SKIPPED" = true ] && args+=(--allow-skipped)
+
+        echo "report-path=$out" >> "$GITHUB_OUTPUT"
+
+        # Capture the summary so the workflow log carries the score even when
+        # the gate fails; the step's own exit code still decides the outcome.
+        set +e
+        fizzra "${args[@]}" | tee "$RUNNER_TEMP/fizzra/scan.log"
+        code=${PIPESTATUS[0]}
+        set -e
+
+        score=$(sed -n 's/^ *Score *\([0-9.]*\)\/100.*/\1/p' "$RUNNER_TEMP/fizzra/scan.log" | head -1)
+        gate=$(sed -n 's/^ *Result *\([A-Za-z]*\).*/\1/p' "$RUNNER_TEMP/fizzra/scan.log" | head -1 | tr '[:upper:]' '[:lower:]')
+        echo "score=${score}" >> "$GITHUB_OUTPUT"
+        echo "gate=${gate}" >> "$GITHUB_OUTPUT"
+
+        if [ "$code" -ne 0 ]; then
+          echo "::error::Fizzra quality gate failed. Review the summary above and the report artefact."
+        fi
+        exit "$code"
+
+    # Uploaded before failing so the annotations are available precisely when
+    # the gate is red. `if: always()` is what makes that ordering work.
+    - name: Upload SARIF
+      if: always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output != '' && inputs.output || 'fizzra.sarif' }}
+        category: fizzra
+      continue-on-error: true
+
+    - name: Upload HTML report
+      if: always() && inputs.format == 'html'
+      uses: actions/upload-artifact@v4
+      with:
+        name: fizzra-report
+        path: ${{ inputs.output != '' && inputs.output || 'fizzra-report.html' }}
+        retention-days: 14
+      continue-on-error: true

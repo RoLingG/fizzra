@@ -1,0 +1,42 @@
+{
+  "name": "fizzra-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web dashboard for Fizzra — lightweight code quality review for Go/Wails projects",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build && npm run smoke:bundle && npm run check:render && npm run check:theme",
+    "build:only": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "check:locales": "node scripts/check-locales.mjs",
+    "check:render": "node scripts/check-render.mjs",
+    "check:served": "node scripts/check-served.mjs",
+    "smoke:bundle": "node scripts/smoke-bundle.mjs",
+    "verify": "npm run typecheck && npm run check:locales && npm run check:theme && npm run build",
+    "check:theme": "node scripts/check-theme-coverage.mjs"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.20.0",
+    "echarts": "^6.1.0",
+    "element-plus": "^2.14.5",
+    "motion-v": "^2.8.0",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.43",
+    "vue-i18n": "^11.4.12",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.11"
+  },
+  "overrides": {
+    "follow-redirects": "^1.16.1"
+  }
+}

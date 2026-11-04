@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Fizzra</title>
+    <meta name="description" content="Lightweight code quality review for Go and Wails projects" />
+    <!-- 标签页图标：与顶栏品牌标记同一个图形，日间是墨底纸芯，夜间反过来。
+         具体用哪张由下面那段内联脚本在首屏前决定，避免先画出错误的一版再换。
+         初始 href 指向日间版，作为脚本不可用时的兜底。 -->
+    <link id="favicon" rel="icon" type="image/png" sizes="32x32" href="/webicon-day.png" />
+    <script>
+      /*
+       * Applies the stored theme and language before the first paint.
+       *
+       * This has to be synchronous and inline: a deferred script would run after
+       * the initial render, and the page would flash the wrong background. The
+       * whole body is wrapped in one try/catch because a theme flash is a
+       * cosmetic annoyance whereas an exception in <head> blanks the app.
+       *
+       * An absent theme key is the correct "follow the system" state, so nothing
+       * is written — the CSS media query handles it with no help from us.
+       */
+      ;(function () {
+        try {
+          var theme = localStorage.getItem('gg:theme')
+          if (theme === 'light' || theme === 'dark') {
+            document.documentElement.dataset.theme = theme
+            document.documentElement.style.colorScheme = theme
+          }
+          var locale = localStorage.getItem('gg:locale')
+          if (locale === 'en' || locale === 'zh') {
+            document.documentElement.lang = locale
+          }
+
+          /* 标签页图标跟随同一套三态规则：显式选择优先，没选过就跟随系统。
+             在首屏前写入，浏览器不会先画出旧图标再替换。 */
+          var dark =
+            theme === 'dark' ||
+            (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          var icon = document.getElementById('favicon')
+          if (icon) icon.href = dark ? '/webicon-night.png' : '/webicon-day.png'
+        } catch (e) {
+          /* Storage unavailable (private mode, disabled) — the defaults stand. */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

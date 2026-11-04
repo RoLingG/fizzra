@@ -1,0 +1,170 @@
+# Sample Fizzra configuration.
+#
+# Copy to ./fizzra.yaml (picked up automatically) or point at it explicitly:
+#
+#     fizzra serve --config ./fizzra.yaml
+#
+# Every value below is optional: the defaults shown here are what Fizzra uses
+# when a key is absent, so an empty file behaves identically.
+
+server:
+  # Bind address. Keep the default loopback address unless you deliberately want
+  # the dashboard reachable from the network — there is no authentication.
+  host: 127.0.0.1
+  port: 8080
+  # debug | release | test
+  mode: release
+  # Origins allowed to call the API. Only needed when running the Vite dev
+  # server (`npm run dev`) against a separate backend process.
+  corsOrigins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+
+database:
+  # SQLite file. Relative paths resolve against the workspace root.
+  # Use ":memory:" for an ephemeral database (useful in CI).
+  dsn: ~/.fizzra/fizzra.db
+  autoMigrate: true
+
+workspace:
+  # Where repositories are cloned and reports are written.
+  root: ~/.fizzra/workspace
+
+scan:
+  # How many analyses run at the same time. Each one may spawn golangci-lint,
+  # gosec and friends, so keep this at or below your CPU core count.
+  concurrency: 2
+  # Wall-clock budget for a whole analysis.
+  timeout: 10m
+  # Wall-clock budget for a single external tool invocation.
+  perToolTimeout: 3m
+  # Restrict which analyzers may run. Empty means "every registered analyzer".
+  # enabledAnalyzers: [custom, metrics, wails, gofmt]
+  #
+  # Try `go install` for missing tools on first use. Off by default: it writes
+  # to your GOPATH and makes the first scan slow.
+  autoInstall: false
+  # Cap on issues persisted per analysis, to protect the database from a
+  # pathological project.
+  maxIssues: 5000
+
+  # Stop analyzers from reaching the network.
+  #
+  # Two of them fetch an advisory database before they can report anything:
+  # cargo-audit clones RustSec, govulncheck pulls the Go vulnerability database.
+  # On a machine without outbound access that fetch does not fail fast — it
+  # blocks until the socket times out, turning a two-second scan into a
+  # minute-long one that then reports nothing.
+  #
+  # The two are handled differently, because they degrade differently:
+  #
+  #   cargo-audit   keeps running against the local advisory database (`--no-fetch`).
+  #                 Still reports findings, just against a snapshot that may be
+  #                 stale. Needs one online run first to have that snapshot.
+  #   govulncheck   skips entirely, with a reason. It has no local-database mode,
+  #                 and a Go vulnerability report against a stale database is
+  #                 worse than none. A skip is visible in the UI and can veto an
+  #                 otherwise-passing gate, so this is not a silent no-op.
+  #
+  # Also settable per analyzer below, and at runtime from the System page.
+  offline: false
+
+  # Per-analyzer settings, keyed by analyzer name.
+  #
+  #   cargo-audit.offline: "true"          use the local advisory database, no fetching
+  #   cargo-audit.scoredTransitive: "true" count dependency-advisory findings in the score
+  #   ruff.<group>: "true"                 enable an optional Python check group
+  #
+  # Values are strings so a typo is a startup error rather than a silent false.
+  # An unknown setting name is rejected, not stored: a switch that does nothing
+  # is worse than one that fails, because you would never learn it had no effect.
+  #
+  # Every analyzer that has settings declares them, and the System page renders a
+  # control for each — so this list is discoverable in the UI rather than needing
+  # to be looked up here.
+  #
+  # analyzerOptions:
+  #   cargo-audit:
+  #     offline: "true"
+  #     # Off by default. cargo-audit reports vulnerabilities in *dependencies*,
+  #     # not in code the team wrote — only a `cargo update` fixes them, and that
+  #     # is often blocked by a pin outside the team's control. Counting them by
+  #     # default meant a project could not reach a passing score by any change it
+  #     # was able to make. The findings still appear, still carry a
+  #     # direct/transitive badge, and still block `maxCritical`/`maxHigh`; they
+  #     # are excluded from the weighted score only.
+  #     scoredTransitive: "true"
+  #   ruff:
+  #     # Off by default. Each covers a category where "is this a problem" is a
+  #     # team's policy rather than a fact, and turning them all on produced 1,271
+  #     # findings on a real 5,500-line project — mostly line length and missing
+  #     # docstrings. Style findings map to `info`, so they appear without moving
+  #     # the quality gate.
+  #     style: "true"          # line length, whitespace, blank lines
+  #     docstrings: "true"     # missing or malformed docstrings
+  #     annotations: "true"    # missing type annotations
+  #     copyright: "true"      # missing copyright header
+  #     naming: "true"         # PEP 8 naming conventions
+  #     pandas: "true"         # pandas anti-patterns
+  #     quotes: "true"         # quote style consistency
+  #     todo: "true"           # TODO comment formatting
+
+# Default quality gate. Per-project overrides live in the web UI and take
+# precedence over these values.
+quality:
+  minScore: 70
+  maxCritical: 0
+  maxHigh: 0
+  maxComplexity: 20
+  # 0 disables the coverage check.
+  minCoverage: 0
+
+# Custom rules, in addition to the built-in set.
+#
+# Rules are Go regular expressions evaluated against source lines. Two things
+# are handled for you: commented-out code and string literals are never matched,
+# so a rule does not have to exclude its own documentation.
+#
+# Optional modifiers:
+#   requireLoop:  true  only report matches inside a loop body
+#   forbidInLoop: true  suppress matches inside a loop body
+rules:
+  - name: no-fmt-println
+    severity: warning
+    message: fmt.Println left in library code
+    advice: Use the project logger so the output can be filtered by level.
+    patterns:
+      - '^\s*fmt\.Print(ln|f)\s*\('
+    paths:
+      - '**/*.go'
+    exclude:
+      - '**/*_test.go'
+      - '**/cmd/**'
+    enabled: true
+
+  - name: require-error-wrapping
+    severity: info
+    message: error returned without context
+    advice: 'Wrap with fmt.Errorf("doing X: %w", err) so the call chain is visible in the log.'
+    patterns:
+      - '^\s*return err$'
+    paths:
+      - '**/internal/**/*.go'
+    enabled: false
+
+  # A Wails-specific rule: emitting from a tight loop floods the JS bridge.
+  - name: wails-no-emit-in-loop
+    severity: warning
+    message: runtime.EventsEmit inside a loop
+    advice: Accumulate the payload and emit once after the loop.
+    patterns:
+      - 'runtime\.EventsEmit\s*\('
+    paths:
+      - '**/*.go'
+    requireLoop: true
+    enabled: true
+
+  # Disable a built-in rule by name without editing the built-in set.
+  - name: context-background-in-request-path
+    severity: info
+    enabled: false

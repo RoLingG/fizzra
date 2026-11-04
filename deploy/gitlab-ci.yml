@@ -1,0 +1,82 @@
+# Fizzra GitLab CI template.
+#
+# Include this from your .gitlab-ci.yml and override the variables as needed:
+#
+#     include:
+#       - local: deploy/gitlab-ci.yml
+#
+#     variables:
+#       FIZZRA_FAIL_ON: "critical,error"
+#       FIZZRA_MIN_SCORE: "75"
+
+variables:
+  # Where the source is in this repository. Override when Fizzra lives in a
+  # separate repo and you vendor the binary instead.
+  FIZZRA_PKG_PATH: "./backend/cmd/fizzra"
+  # Levels that fail the pipeline: critical, error, warning (comma separated).
+  FIZZRA_FAIL_ON: "critical,error"
+  # Overrides the gate's minimum score. Leave empty to use the project setting.
+  FIZZRA_MIN_SCORE: ""
+
+.fizzra:
+  image: golang:1.27
+  variables:
+    GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+  cache:
+    key: fizzra-$CI_COMMIT_REF_SLUG
+    paths:
+      - .cache/go-build/
+
+fizzra:scan:
+  extends: .fizzra
+  stage: test
+  timeout: 20m
+  before_script:
+    - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest || true
+    - go install github.com/securego/gosec/v2/cmd/gosec@latest || true
+    - go install golang.org/x/vuln/cmd/govulncheck@latest || true
+    - export PATH="$PATH:$(go env GOPATH)/bin"
+    - go build -o /usr/local/bin/fizzra "$FIZZRA_PKG_PATH"
+  script:
+    - |
+      ARGS="--format sarif --output fizzra.sarif --fail-on $FIZZRA_FAIL_ON"
+      if [ -n "$FIZZRA_MIN_SCORE" ]; then
+        ARGS="$ARGS --min-score $FIZZRA_MIN_SCORE"
+      fi
+      # Capture the exit code so the report still gets produced on failure.
+      set +e
+      fizzra ci . $ARGS
+      STATUS=$?
+      set -e
+
+      fizzra report . --format html --output fizzra-report.html || true
+
+      if [ $STATUS -ne 0 ]; then
+        echo "Fizzra quality gate failed."
+        exit $STATUS
+      fi
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - fizzra-report.html
+    reports:
+      # GitLab renders SARIF findings in the merge request widget.
+      sarif: fizzra.sarif
+
+# A lighter job for feature branches: report, never block.
+fizzra:advisory:
+  extends: .fizzra
+  stage: test
+  timeout: 20m
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - go build -o /usr/local/bin/fizzra "$FIZZRA_PKG_PATH"
+    - fizzra scan . --quiet
+    - fizzra report . --format html --output fizzra-report.html
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - fizzra-report.html

@@ -1,0 +1,477 @@
+{{/*
+  自包含的 HTML 报告。
+
+  几条约束决定了这个模板的写法：
+    * 不发起外部请求：不引 CDN，不引 web 字体。CI 产物要在断网的机器上也能渲染。
+    * 不依赖 JS 框架。唯一的脚本是问题表上方那个过滤框，几十行原生 JS。
+    * 打印效果要正常：问题表是大家贴进工单的东西。
+*/}}
+<!doctype html>
+<html lang="{{.S.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fizzra — {{.Project.Name}}</title>
+<style>
+  /* 与仪表盘同一套单色 token，报告和应用读起来是一个产品。
+   * 只做浅色：这份文件被打印、被贴进工单的次数远多于在深色屏上阅读。 */
+  :root {
+    --bg: #ffffff;
+    --panel: #fafafa;
+    --card: #f2f2f2;
+    --border: #ededed;
+    --card-line: #e3e3e3;
+    --text: #000000;
+    --body: #2e2e2e;
+    --muted: #6e6e6e;
+    --soft: #9b9b9b;
+    --critical: #b42318;
+    --error: #b42318;
+    --warning: #c2900a;
+    --info: #1d4ed8;
+    --good: #0d7a3e;
+    --ok: #65a30d;
+    --warn: #c2900a;
+    --bad: #b42318;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem 4rem;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    color: var(--text); background: var(--bg); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 报告是一页宽表，「说明」列最需要宽度，所以版面带宽度铺开。
+     上限留 1800px，再宽一行文字会长到难跟读。 */
+  .wrap { max-width: min(1800px, 100% - 4rem); margin: 0 auto; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  h1 { margin: 0 0 .25rem; font-size: 2rem; font-weight: 620; letter-spacing: -.03em; }
+  h2 { font-size: 1.05rem; font-weight: 620; margin: 2rem 0 .75rem; letter-spacing: -.012em; }
+  .sub { color: var(--muted); font-size: .875rem; }
+  .sub code { background: var(--panel); padding: .1rem .35rem; border-radius: 6px;
+              font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .8rem; }
+
+  /* 卡片与仪表盘同一套：白底、细描边、柔和投影，圆角用 22px 一档 */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; }
+  .card { border: 1px solid var(--card-line); border-radius: 22px; padding: 1rem 1.15rem;
+          background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--soft); }
+  .card .value { font-size: 1.5rem; font-weight: 640; margin-top: .2rem;
+                 font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+  .card .value.good { color: var(--good); }
+  .card .value.ok   { color: var(--ok); }
+  .card .value.warn { color: var(--warn); }
+  .card .value.bad  { color: var(--bad); }
+  .card .unit { font-size: .8rem; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+
+  /* 门禁标签用与仪表盘状态标签相同的柔和底 + 深色字 */
+  .gate { display: inline-block; padding: .2rem .7rem; border-radius: 999px;
+          font-size: .72rem; font-weight: 620; text-transform: uppercase; letter-spacing: .04em; }
+  .gate.passed { background: #eefaf3; color: var(--good); }
+  .gate.failed { background: #fef3f2; color: var(--bad); }
+  .gate.skipped { background: var(--panel); color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  th { text-align: left; font-weight: 600; font-size: .72rem; text-transform: uppercase;
+       letter-spacing: .06em; color: var(--muted); padding: .6rem .7rem;
+       border-bottom: 1px solid var(--border); }
+  /* 行悬停不铺底色，只加深上下两条线，和仪表盘表格的抽屉效果一致 */
+  td { padding: .65rem .7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { box-shadow: inset 0 1px 0 var(--card-line), inset 0 -1px 0 var(--card-line); }
+  td.loc { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+           font-size: .8rem; white-space: nowrap; color: var(--muted); }
+  td.msg { min-width: 22rem; }
+  /* 规则名里有斜杠分隔（lint/suspicious/...）和双冒号（clippy::...），浏览器默认只在
+   * 空白处断行，于是这些名字只能整块溢出或者被硬切。overflow-wrap 允许在放不下时
+   * 从任意位置断开，配上等宽字体，断在斜杠上读起来是清楚的。 */
+  td.rule { overflow-wrap: anywhere; }
+  code.inline { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+                font-size: .78rem; background: var(--panel); padding: .1rem .3rem; border-radius: 6px; }
+
+    .sev { display: inline-block; padding: 2px 9px; border-radius: 999px;
+         font-size: .7rem; font-weight: 600; letter-spacing: .04em;
+         text-transform: uppercase;
+         /* 标签里的词不换行。
+          *
+          * 单元格宽度是按英文最长的 CRITICAL 定的，中文「严重」两个字远用不到那么多，
+          * 但 .04em 的字距会把中文推开一点，加上内边距占的位置，浏览器会在两个字之间
+          * 断行——标签就竖成两排。
+          *
+          * 中英文都不该断：这是个状态标记，折行只让它更难读。
+          */
+         white-space: nowrap; }
+  /* 中文的严重级别词是「严重」「警告」这类两字词，字距对拉丁字母才成立，
+   * 加在汉字上只会让每个标签宽一点而没有任何可读性上的好处。 */
+  html[lang="zh"] .sev { letter-spacing: 0; }
+  .sev-critical { background: #fef3f2; color: var(--critical); }
+  .sev-error    { background: #fef3f2; color: var(--error); }
+  .sev-warning  { background: #fff8e3; color: var(--warning); }
+  .sev-info     { background: #eff4ff; color: var(--info); }
+
+  .advice { color: var(--muted); font-size: .8rem; margin-top: .2rem; }
+
+  /* 修改前后对照。红绿是按惯例来的，不需要图例；底色压得很淡，让代码本身成为这一行
+   * 里对比度最高的东西。
+   *
+   * 整块默认收起（details 的默认状态），列表因此每一行都是同一个高度，可以扫读。 */
+  .fix { margin-top: .45rem; }
+  .fix > summary {
+    /* 去掉原生三角，换成自己的标记：原生标记在各浏览器里大小和位置都不一致，
+     * 在一张对齐的表格里很显眼。 */
+    list-style: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    font-size: .72rem;
+    font-weight: 600;
+    color: var(--muted);
+    padding: .15rem .5rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel);
+    user-select: none;
+  }
+  .fix > summary::-webkit-details-marker { display: none; }
+  /* 展开前显示 ▸，展开后转成 ▾。用 CSS 内容而不是把字符写进 HTML，
+   * 这样切换状态不需要脚本。 */
+  .fix > summary::before { content: '▸'; font-size: .8rem; line-height: 1; }
+  .fix[open] > summary::before { content: '▾'; }
+  .fix > summary:hover { color: var(--body); border-color: var(--card-line); }
+
+  /* 展开后的内容用 grid 竖排，间距由容器统一给，块自己不带外边距。 */
+  .fix[open] > summary { margin-bottom: .5rem; }
+  .fix > .fix-block + .fix-block { margin-top: .35rem; }
+  .fix-block { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .fix-before { background: #fef3f2; border-color: #f6d4d1; }
+  .fix-after  { background: #eefaf3; border-color: #ccebd9; }
+  .fix-label { font-size: .65rem; font-weight: 700; letter-spacing: .08em;
+               text-transform: uppercase; padding: .2rem .6rem; }
+  .fix-before .fix-label { color: var(--critical); }
+  .fix-after  .fix-label { color: var(--good); }
+  /* 代码块的外层容器。
+   *
+   * 表格是 table-layout: auto，列宽由内容决定。一段超长代码会把这一列往宽里推，
+   * 同时给 <pre> 算出一个它自己挑的宽度，结果是代码既不换行也不滚动，而是被挤成
+   * 一列零碎的字。
+   *
+   * 这层容器把 <pre> 从列宽的计算里摘出去：width: 0 让它的内容不参与父级的宽度推导
+   * （表格因此只看到「宽度为 0 的东西」，列宽回归由表头和其他单元格决定），
+   * min-width: 100% 再把它拉回单元格的实际宽度。<pre> 于是在一个明确的宽度里溢出，
+   * overflow-x: auto 才有意义。 */
+  .fix-scroll { width: 0; min-width: 100%; }
+  .fix-note { color: var(--muted); font-size: .78rem; line-height: 1.5; margin-top: .35rem; }
+
+  /* 代码块本身，连同它的横向滚动条。
+   *
+   * 只用 ::-webkit-* 这一套，不写 scrollbar-width / scrollbar-color。
+   *
+   * 两者是互斥的：一旦声明 scrollbar-width，Chrome 就切到标准滚动条模式，整个
+   * ::-webkit-scrollbar-* 家族被忽略——包括用来去掉两端箭头的 button 规则。那样滚动
+   * 条会退回默认外观，颜色和箭头都改不动。这里要的是精确配色和去箭头，所以只能留
+   * WebKit 这一套；代价是 Firefox 退回默认滚动条，而这份报告主要在 Chrome/Edge 里读。
+   *
+   * 默认那套是：一条粗灰横条，两端各带一个箭头，和单色报告不是一套视觉。做得太轻也
+   * 不行：滑块要和它所在的浅红/浅绿底色拉开距离，否则用户只会以为这块根本不滚。
+   *
+   * 滑块因此用不透明的中性灰：#767676 在两种底色上分别有 4.2 和 4.4 的对比度，
+   * 高于图形需要的 3.0。
+   */
+  .fix pre { margin: 0; padding: .55rem .65rem; font-size: .72rem; line-height: 1.55;
+             overflow-x: auto; white-space: pre; color: var(--body); }
+  .fix pre::-webkit-scrollbar { height: 8px; width: 8px; }
+  .fix pre::-webkit-scrollbar-track { background: transparent; }
+  /* 0 尺寸即等于不渲染，两端因此不会留出任何空隙。
+   * 三种状态都要写：不同的悬停/可用状态下，浏览器匹配的是不同的伪类。 */
+  .fix pre::-webkit-scrollbar-button,
+  .fix pre::-webkit-scrollbar-button:start:decrement,
+  .fix pre::-webkit-scrollbar-button:end:increment { display: none; width: 0; height: 0; }
+  .fix pre::-webkit-scrollbar-corner { background: transparent; }
+  .fix pre::-webkit-scrollbar-thumb {
+    background: #767676;
+    border-radius: 999px;
+  }
+  .fix pre::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+
+  @media print {
+    /* 打印时全部展开：纸上没有可点的东西，收着的内容等于不存在。 */
+    .fix > summary { display: none; }
+    .fix > .fix-block, .fix > .fix-note, .fix > .fix-block + .fix-block { display: block; }
+    .fix-block { break-inside: avoid; margin-top: .35rem; }
+  }
+  .bars { display: flex; height: 8px; border-radius: 999px; overflow: hidden;
+          background: var(--panel); }
+  .bars span { display: block; height: 100%; }
+  .bars .b-critical { background: var(--critical); }
+  .bars .b-error    { background: var(--error); }
+  .bars .b-warning  { background: var(--warning); }
+  .bars .b-info     { background: var(--info); }
+
+  .spark { width: 100%; height: 90px; }
+  .spark polyline { fill: none; stroke: var(--text); stroke-width: 2; }
+  .spark line { stroke: var(--border); stroke-width: 1; }
+
+  .toolbar { display: flex; gap: .5rem; align-items: center; margin: 1rem 0 .5rem; }
+  input[type=search] { flex: 0 0 22rem; padding: .5rem .7rem; border: 1px solid var(--border);
+                       border-radius: 14px; font-size: .875rem; font-family: inherit;
+                       color: var(--text); background: #fff; }
+  input[type=search]:focus { outline: none; border-color: var(--text); }
+  .toolbar .count { color: var(--muted); font-size: .8rem; }
+
+  .dedup { color: var(--muted); font-size: .75rem; }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border);
+           color: var(--muted); font-size: .8rem; }
+
+  @media print {
+    body { padding: 0; }
+    tr:hover td { box-shadow: none; }
+    .toolbar { display: none; }
+    .card { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>{{.Project.Name}}</h1>
+    <p class="sub">
+      {{if .Project.RepoURL}}<code>{{.Project.RepoURL}}</code> · {{end}}
+      {{.S.BranchLabel}} <code>{{.Analysis.Branch}}</code> ·
+      {{if .Project.Kind}}{{.S.KindLabel}} <code>{{.Project.Kind}}</code> · {{end}}
+      {{.S.ScannedLabel}} {{formatTime .Analysis.CreatedAt}}
+      {{if .Analysis.DurationMS}} {{formatDuration .Analysis.DurationMS}}{{end}}
+    </p>
+    <p class="sub">
+      {{.S.AnalysisLabel}} <code>{{.Analysis.ID}}</code> ·
+      {{.S.AnalyzersWord}}: {{range $i, $a := .Analysis.Analyzers}}{{if $i}}, {{end}}<code>{{$a}}</code>{{end}}
+    </p>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">{{.S.QualityScore}}</div>
+      <div class="value {{scoreClass .Analysis.Score}}">
+        {{printf "%.1f" .Analysis.Score}}<span class="unit">/100</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">{{.S.QualityGate}}</div>
+      <div class="value"><span class="gate {{.Analysis.GateStatus}}">{{.Analysis.GateStatus}}</span></div>
+    </div>
+    <div class="card">
+      <div class="label">{{.S.IssuesWord}}</div>
+      <div class="value">{{.Stats.Total}}</div>
+    </div>
+    <div class="card">
+      <div class="label">{{.S.CriticalWord}}</div>
+      <div class="value {{if gt .Stats.BySeverity.critical 0}}bad{{else}}good{{end}}">{{index .Stats.BySeverity "critical"}}</div>
+    </div>
+    <div class="card">
+      <div class="label">{{.S.FilesWord}}</div>
+      <div class="value">{{.Analysis.Metrics.Files}}</div>
+    </div>
+    <div class="card">
+      <div class="label">{{.S.CoverageWord}}</div>
+      <div class="value">
+        {{if gt .Analysis.Metrics.Coverage 0.0}}{{printf "%.1f" .Analysis.Metrics.Coverage}}<span class="unit">%</span>{{else}}<span class="unit">{{.S.NotAvailable}}</span>{{end}}
+      </div>
+    </div>
+  </div>
+
+  {{if .Analysis.GateReason}}
+  <p class="sub" style="margin-top:.75rem"><strong>{{.S.GateWord}}:</strong> {{.Analysis.GateReason}}</p>
+  {{end}}
+
+  {{if .Trend}}
+  <h2>{{.S.ScoreHistory}}</h2>
+  <svg class="spark" viewBox="0 0 600 80" preserveAspectRatio="none" role="img"
+       aria-label="{{template "ariaTrend" .}}">
+    <line x1="0" y1="20" x2="600" y2="20"></line>
+    <line x1="0" y1="40" x2="600" y2="40"></line>
+    <line x1="0" y1="60" x2="600" y2="60"></line>
+    <polyline points="{{scorePath .Trend}}"></polyline>
+  </svg>
+  <p class="sub">{{.S.ScoreHistorySub}}</p>
+  {{end}}
+
+  <h2>{{.S.Breakdown}}</h2>
+  <div class="bars" role="img" aria-label="{{.S.Breakdown}}">
+    {{$t := .Stats.Total}}
+    <span class="b-critical" style="width:{{pct (index .Stats.BySeverity "critical") $t}}%"></span>
+    <span class="b-error"    style="width:{{pct (index .Stats.BySeverity "error") $t}}%"></span>
+    <span class="b-warning"  style="width:{{pct (index .Stats.BySeverity "warning") $t}}%"></span>
+    <span class="b-info"     style="width:{{pct (index .Stats.BySeverity "info") $t}}%"></span>
+  </div>
+  <table style="margin-top:.5rem">
+    <thead><tr><th>{{.S.ColSeverity}}</th><th>{{.S.ColCount}}</th><th>{{.S.ColShare}}</th></tr></thead>
+    <tbody>
+      {{$t := .Stats.Total}}
+      {{$s := .S}}
+      {{with index .Stats.BySeverity "critical"}}{{if gt . 0}}
+      <tr><td><span class="sev sev-critical">{{template "sevCritical" $}}</span></td><td>{{.}}</td><td>{{printf "%.1f" (pct . $t)}}%</td></tr>
+      {{end}}{{end}}
+      {{with index .Stats.BySeverity "error"}}{{if gt . 0}}
+      <tr><td><span class="sev sev-error">{{template "sevError" $}}</span></td><td>{{.}}</td><td>{{printf "%.1f" (pct . $t)}}%</td></tr>
+      {{end}}{{end}}
+      {{with index .Stats.BySeverity "warning"}}{{if gt . 0}}
+      <tr><td><span class="sev sev-warning">{{template "sevWarning" $}}</span></td><td>{{.}}</td><td>{{printf "%.1f" (pct . $t)}}%</td></tr>
+      {{end}}{{end}}
+      {{with index .Stats.BySeverity "info"}}{{if gt . 0}}
+      <tr><td><span class="sev sev-info">{{template "sevInfo" $}}</span></td><td>{{.}}</td><td>{{printf "%.1f" (pct . $t)}}%</td></tr>
+      {{end}}{{end}}
+    </tbody>
+  </table>
+
+  {{if .Stats.TopRules}}
+  <h2>{{.S.TopRules}}</h2>
+  <table>
+    <thead><tr><th>{{.S.ColRule}}</th><th>{{.S.ColAnalyzer}}</th><th>{{.S.ColSeverity}}</th><th>{{.S.ColCount}}</th></tr></thead>
+    <tbody>
+      {{range .Stats.TopRules}}
+      <tr>
+        <td><code class="inline">{{.Rule}}</code></td>
+        <td>{{.Analyzer}}</td>
+        <td><span class="sev sev-{{.Severity}}">{{severityWord .Severity}}</span></td>
+        <td>{{.Count}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+
+  {{if .Analysis.Metrics.MaxComplexity}}
+  <h2>{{.S.Complexity}}</h2>
+  <p class="sub">
+    {{.S.ComplexityAvg}} {{printf "%.1f" .Analysis.Metrics.AvgComplexity}} ·
+    {{.S.ComplexityWorst}} {{.Analysis.Metrics.MaxComplexity}} ·
+    {{.S.ComplexityDup}} {{printf "%.1f" .Analysis.Metrics.Duplication}}%
+  </p>
+  {{if .Analysis.Metrics.ComplexFunctions}}
+  <table>
+    <thead><tr><th>{{.S.ColFunction}}</th><th>{{.S.ColLocation}}</th><th>{{.S.ColComplexity}}</th><th>{{.S.ColLines}}</th><th>{{.S.ColParams}}</th></tr></thead>
+    <tbody>
+      {{range .Analysis.Metrics.ComplexFunctions}}
+      <tr>
+        <td>{{if .Receiver}}{{.Receiver}}.{{end}}{{.Name}}</td>
+        <td class="loc">{{.File}}:{{.Line}}</td>
+        <td>{{.Complexity}}</td>
+        <td>{{.Length}}</td>
+        <td>{{.Params}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+  {{end}}
+
+  <h2>{{.S.IssuesSection}} ({{.Stats.Total}})</h2>
+
+  <div class="toolbar">
+    <input type="search" id="filter" placeholder="{{.S.FilterPlaceholder}}"
+           aria-label="{{.S.FilterAria}}">
+    <span class="count" id="count"></span>
+  </div>
+
+  <table id="issues">
+    <thead>
+      <tr>
+        <th style="width:5rem">{{.S.ColSeverity}}</th>
+        <th style="width:7rem">{{.S.ColAnalyzer}}</th>
+        <th style="width:14rem">{{.S.ColRule}}</th>
+        <th class="msg">{{.S.ColMessage}}</th>
+        <th style="width:13rem">{{.S.ColLocation}}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Issues}}
+      <tr>
+        <td><span class="sev {{severityClass .Severity}}">{{severityLabel .Severity}}</span></td>
+        <td>{{.Analyzer}}</td>
+        <td class="rule"><code class="inline">{{.Rule}}</code></td>
+        <td class="msg">
+          {{.Message}}
+          {{if .Advice}}<div class="advice">→ {{.Advice}}</div>{{end}}
+          {{if or .Fix.Before .Fix.After .Fix.Note}}
+          {{/* 详细内容默认收起，用原生 details 实现：报告要能脱网打开，加不了框架，
+               而 details 是浏览器自带的，不需要一行脚本。
+               报告早先把这段内联展开，理由是「看问题的人希望修改方案就在眼前」。
+               那条理由在实际排版里站不住：带示例的问题能占三四百像素，同一张表里
+               普通问题只有五六十像素，一屏里混着两种高度就没法扫读了。收起之后每行
+               回到同一个高度，要点开看示例只是多点一下。 */}}
+          <details class="fix">
+            <summary>{{$.S.FixToggle}}</summary>
+            {{if .Fix.Before}}
+            <div class="fix-block fix-before">
+              <div class="fix-label">{{$.S.FixBefore}}</div>
+              <div class="fix-scroll"><pre>{{.Fix.Before}}</pre></div>
+            </div>
+            {{end}}
+            {{if .Fix.After}}
+            <div class="fix-block fix-after">
+              <div class="fix-label">{{$.S.FixAfter}}</div>
+              <div class="fix-scroll"><pre>{{.Fix.After}}</pre></div>
+            </div>
+            {{end}}
+            {{if .Fix.Note}}<div class="fix-note">{{.Fix.Note}}</div>{{end}}
+          </details>
+          {{end}}
+        </td>
+        <td class="loc">
+          {{if .File}}{{.File}}{{if .Line}}:{{.Line}}{{end}}{{else}}<span class="dedup">{{$.S.ProjectWide}}</span>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  {{if not .Issues}}
+  <p class="sub">{{.S.NoIssues}}</p>
+  {{end}}
+
+  <footer>
+    {{.S.FooterIntro}} {{.Version}} · {{formatTime .GeneratedAt}}.
+    {{.S.FooterSelfContained}}
+  </footer>
+</div>
+
+{{/* 严重级别的词要按语言取，而 range/with 会改变点号，所以做成子模板，把根对象传进来 */}}
+{{define "sevCritical"}}{{.S.SevCritical}}{{end}}
+{{define "sevError"}}{{.S.SevError}}{{end}}
+{{define "sevWarning"}}{{.S.SevWarning}}{{end}}
+{{define "sevInfo"}}{{.S.SevInfo}}{{end}}
+{{define "ariaTrend"}}{{replace .S.AriaTrend "{count}" (printf "%d" (len .Trend))}}{{end}}
+
+<script>
+// A filter box is the entire interactive surface. Kept inline so the report
+// stays a single portable file.
+(function () {
+  var input = document.getElementById('filter');
+  var table = document.getElementById('issues');
+  if (!input || !table) return;
+
+  var rows = Array.prototype.slice.call(table.tBodies[0].rows);
+  var count = document.getElementById('count');
+  // 「显示 N / M 条」这句话由 Go 侧按语言给出，这里只把两个数字填进去。
+  // 不要用 printf "%q"：html/template 认出这是 JS 字符串上下文，会自己加引号并按 JS
+  // 规则转义；再套一层 %q 就变成字面量里带着引号，页面上的计数会多出一对引号。
+  var template = {{.S.ShownTemplate}};
+
+  function update() {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0;
+    rows.forEach(function (row) {
+      var match = q === '' || row.textContent.toLowerCase().indexOf(q) !== -1;
+      row.style.display = match ? '' : 'none';
+      if (match) shown++;
+    });
+    count.textContent = template.replace('{shown}', shown).replace('{total}', rows.length);
+  }
+
+  input.addEventListener('input', update);
+  update();
+})();
+</script>
+</body>
+</html>
