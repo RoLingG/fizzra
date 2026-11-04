@@ -21,7 +21,11 @@ npm-debug.log*
 yarn-error.log*
 
 # The built dashboard, which is embedded into the Go binary.
-backend/internal/web/dist/
+# The directory itself is kept via .gitkeep: `//go:embed all:dist` fails to
+# compile when the pattern matches nothing, and a checkout that has not run the
+# frontend build yet would otherwise fail `go vet` and `go build`.
+backend/internal/web/dist/*
+!backend/internal/web/dist/.gitkeep
 
 # Scratch space, documentation and demos.
 /demo/
