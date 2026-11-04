@@ -48,6 +48,9 @@ inputs:
     description: >-
       Upload the SARIF report with codeql-action/upload-sarif so findings appear
       as inline annotations. Requires the caller to grant security-events: write.
+      GitHub only accepts these uploads for public repositories and for private
+      ones on a plan with GitHub Advanced Security; elsewhere the step fails but
+      is marked continue-on-error, so the scan itself still gates the build.
     required: false
     default: 'true'
 
@@ -156,7 +159,7 @@ runs:
     # the gate is red. `if: always()` is what makes that ordering work.
     - name: Upload SARIF
       if: always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif'
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ inputs.output != '' && inputs.output || 'fizzra.sarif' }}
         category: fizzra
@@ -164,7 +167,7 @@ runs:
 
     - name: Upload HTML report
       if: always() && inputs.format == 'html'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: fizzra-report
         path: ${{ inputs.output != '' && inputs.output || 'fizzra-report.html' }}
