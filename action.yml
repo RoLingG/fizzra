@@ -99,18 +99,21 @@ runs:
 
         echo "Downloading $url"
 
-        dest="$RUNNER_TEMP/fizzra/$asset"
-        mkdir -p "$(dirname "$dest")"
-        curl -fsSL --retry 3 -o "$dest" "$url"
-        chmod +x "$dest"
-        echo "$(dirname "$dest")" >> "$GITHUB_PATH"
-        # The Windows asset keeps its .exe suffix; name the command explicitly
-        # so later steps can call `fizzra` on both platforms.
-        if [ "$RUNNER_OS" = Windows ]; then
-          cp "$dest" "$(dirname "$dest")/fizzra.exe"
-        fi
+        # Always install as `fizzra` so later steps call the same command on
+        # both platforms instead of the release's asset name.
+        bindir="$RUNNER_TEMP/fizzra"
+        mkdir -p "$bindir"
+        cmd="$bindir/fizzra"
+        if [ "$RUNNER_OS" = Windows ]; then cmd="$cmd.exe"; fi
+
+        curl -fsSL --retry 3 -o "$cmd" "$url"
+        chmod +x "$cmd"
+
+        # GITHUB_PATH only affects later steps, so the version check below uses
+        # the absolute path rather than relying on PATH.
+        echo "$bindir" >> "$GITHUB_PATH"
         echo "::group::fizzra version"
-        "$dest" version || true
+        "$cmd" version || true
         echo "::endgroup::"
 
     - name: Scan
@@ -140,10 +143,12 @@ runs:
           args+=(--output "$out")
         fi
 
-        [ -n "$INPUT_ANALYZERS" ] && args+=(--analyzers "$INPUT_ANALYZERS")
-        [ -n "$INPUT_FAIL_ON" ] && args+=(--fail-on "$INPUT_FAIL_ON")
-        [ -n "$INPUT_MIN_SCORE" ] && args+=(--min-score "$INPUT_MIN_SCORE")
-        [ "$INPUT_ALLOW_SKIPPED" = true ] && args+=(--allow-skipped)
+        # `if` rather than `[ ... ] && cmd`: under `set -e` a false test makes
+        # the whole line return 1 and aborts the step.
+        if [ -n "$INPUT_ANALYZERS" ]; then args+=(--analyzers "$INPUT_ANALYZERS"); fi
+        if [ -n "$INPUT_FAIL_ON" ]; then args+=(--fail-on "$INPUT_FAIL_ON"); fi
+        if [ -n "$INPUT_MIN_SCORE" ]; then args+=(--min-score "$INPUT_MIN_SCORE"); fi
+        if [ "$INPUT_ALLOW_SKIPPED" = true ]; then args+=(--allow-skipped); fi
 
         echo "report-path=$out" >> "$GITHUB_OUTPUT"
 
