@@ -161,7 +161,7 @@ jobs:
           curl -sf http://127.0.0.1:18080/api/v1/system/info | grep -q '"version"'
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             fizzra-linux-amd64
