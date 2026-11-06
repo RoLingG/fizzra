@@ -183,11 +183,19 @@ type sarifDriver struct {
 }
 
 type sarifRule struct {
-	ID               string        `json:"id"`
-	Name             string        `json:"name"`
-	ShortDescription sarifText     `json:"shortDescription"`
-	Help             *sarifText    `json:"help,omitempty"`
-	DefaultConfig    sarifRuleConf `json:"defaultConfiguration"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	ShortDescription sarifText `json:"shortDescription"`
+	// FullDescription 是 GitHub 标为必需的字段，缺了规则的详情页会空一块
+	FullDescription sarifText     `json:"fullDescription"`
+	Help            *sarifText    `json:"help,omitempty"`
+	DefaultConfig   sarifRuleConf `json:"defaultConfiguration"`
+	// Properties 里的 tags 让 GitHub 能按类别筛结果
+	Properties sarifRuleProps `json:"properties"`
+}
+
+type sarifRuleProps struct {
+	Tags []string `json:"tags,omitempty"`
 }
 
 type sarifRuleConf struct {
@@ -203,6 +211,11 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifText       `json:"message"`
 	Locations []sarifLocation `json:"locations,omitempty"`
+	// PartialFingerprints 让 GitHub 跨提交认出同一个问题
+	//
+	// GitHub 只读 primaryLocationLineHash。缺了它 upload-sarif 会自己补，补出来的值
+	// 依赖仓库里同时有源码。补不上时同一个问题每次扫描都变成新告警，旧的自动关闭、新的重新出现
+	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
 }
 
 type sarifLocation struct {
@@ -242,11 +255,15 @@ func WriteSARIF(w io.Writer, r Report) error {
 		}
 		ruleIndex[key] = len(rules)
 		rules = append(rules, sarifRule{
-			ID:               key,
-			Name:             issue.Rule,
+			ID:   key,
+			Name: issue.Rule,
+			// shortDescription 和 fullDescription 在 GitHub 那边都是必需字段
+			// 前者用规则自身的描述，后者用 advice，那是发现里最接近完整说明的一段
 			ShortDescription: sarifText{Text: firstNonEmpty(issue.Message, issue.Rule)},
+			FullDescription:  sarifText{Text: firstNonEmpty(issue.Advice, issue.Message, issue.Rule)},
 			Help:             helpFor(issue),
 			DefaultConfig:    sarifRuleConf{Level: sarifLevel(issue.Severity)},
+			Properties:       sarifRuleProps{Tags: tagsFor(issue)},
 		})
 	}
 
@@ -256,6 +273,13 @@ func WriteSARIF(w io.Writer, r Report) error {
 			RuleID:  issue.Analyzer + ":" + issue.Rule,
 			Level:   sarifLevel(issue.Severity),
 			Message: sarifText{Text: issue.Message},
+		}
+		// 适配 GitHub 存下来的指纹跨扫描稳定，也不含行号
+		// 即便发现往下挪了几行仍然是同一个，也不会变成新告警
+		if issue.Fingerprint != "" {
+			result.PartialFingerprints = map[string]string{
+				"primaryLocationLineHash": issue.Fingerprint,
+			}
 		}
 		if issue.File != "" {
 			region := &sarifRegion{StartLine: max(issue.Line, 1)}
@@ -278,7 +302,7 @@ func WriteSARIF(w io.Writer, r Report) error {
 		Runs: []sarifRun{{
 			Tool: sarifTool{Driver: sarifDriver{
 				Name:           "Fizzra",
-				InformationURI: "https://github.com/rolingg/fizzra",
+				InformationURI: "https://github.com/RoLingG/fizzra",
 				Version:        r.Version,
 				Rules:          rules,
 			}},
@@ -291,6 +315,20 @@ func WriteSARIF(w io.Writer, r Report) error {
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	return enc.Encode(log)
+}
+
+// tagsFor 给出 GitHub 用来筛选结果的标签
+// 取值沿用 CodeQL 的惯例，用户从它迁过来时筛选习惯不用改，critical 额外标 security
+// 是因为 GitHub 的安全告警视图按这个标签归类
+func tagsFor(issue model.Issue) []string {
+	tags := []string{"maintainability"}
+	switch {
+	case issue.Severity == model.SeverityCritical:
+		tags = []string{"security", "correctness"}
+	case issue.Severity == model.SeverityError:
+		tags = []string{"correctness"}
+	}
+	return tags
 }
 
 func helpFor(issue model.Issue) *sarifText {

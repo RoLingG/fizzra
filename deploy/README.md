@@ -24,7 +24,7 @@ jobs:
         with:
           go-version: '1.27.3'   # must satisfy go.mod
 
-      - uses: RoLingG/fizzra@v0.1.2
+      - uses: RoLingG/fizzra@v0.1.3
         with:
           fail-on: critical
 ```
@@ -71,15 +71,79 @@ relax the second: a crash stays a failure no matter what.
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `path` | `.` | Directory to scan |
-| `analyzers` | (all applicable) | Comma separated analyzer names |
-| `fail-on` | `critical,error` | Severities that fail the gate. `warning` also passes unless raised |
-| `min-score` | from config | Override the minimum score |
+| `path` | `.` | Directory to scan, relative to the workspace |
+| `analyzers` | (all applicable) | Comma separated analyzer names, e.g. `custom,metrics,wails` |
+| `fail-on` | `critical,error` | Severities that fail the gate: `critical`, `error`, `warning` |
+| `min-score` | from config (70) | Override the minimum score. Below it the gate fails |
 | `allow-skipped` | `false` | Pass when every analyzer was skipped for missing tools |
-| `format` | `sarif` | `sarif`, `json`, `html` or `text` |
-| `output` | by format | Report path |
+| `format` | `sarif` | Primary format: `sarif`, `json`, `html` or `text` |
+| `extra-formats` | (none) | Extra formats from the same scan: `json`, `html`, `sarif` |
+| `output` | by format | Report path. Defaults to `fizzra.sarif`, `fizzra.json` or `fizzra-report.html` |
 | `version` | `latest` | Release to download — pin a tag in CI |
-| `upload-sarif` | `true` | Upload with codeql-action |
+| `upload-sarif` | `true` | Upload with codeql-action. Needs `security-events: write` |
+
+#### `fail-on` and `min-score`
+
+Two independent ways to fail a build. `fail-on` counts findings by severity;
+`min-score` compares the overall score. Either one can fail the step.
+
+```yaml
+# Fail on any critical or error finding, and also below 80 points.
+- uses: RoLingG/fizzra@v0.1.3
+  with:
+    fail-on: critical,error
+    min-score: '80'
+```
+
+Warnings never fail on their own. Raise `fail-on` to include them only if you
+want style-level findings to block merges; the score already reflects them.
+
+#### `format` versus `extra-formats`
+
+`format` is the report that decides the gate's result and, when it is `sarif`,
+the one uploaded to code scanning. `extra-formats` writes additional files from
+the **same analysis** — no second scan — and attaches them as one artifact.
+
+```yaml
+# Keep SARIF for code scanning, and also attach JSON and HTML for humans.
+- uses: RoLingG/fizzra@v0.1.3
+  with:
+    extra-formats: json,html
+```
+
+The artifact is named `fizzra-reports` and contains `fizzra.json` and
+`fizzra-report.html`. It is uploaded even when the gate fails, so a red build
+still carries the evidence.
+
+To download the artifact from another job:
+
+```yaml
+- uses: actions/download-artifact@v6
+  with:
+    name: fizzra-reports
+```
+
+#### `analyzers`
+
+Empty runs every analyzer applicable to the detected language. Naming a subset
+is how you trade coverage for speed:
+
+```yaml
+- uses: RoLingG/fizzra@v0.1.3
+  with:
+    analyzers: custom,metrics      # no external tools needed, runs in seconds
+```
+
+#### `path`
+
+Scans a subdirectory instead of the repository root. Useful in a monorepo
+where each package has its own workflow:
+
+```yaml
+- uses: RoLingG/fizzra@v0.1.3
+  with:
+    path: services/api
+```
 
 ### Outputs
 
@@ -87,7 +151,16 @@ relax the second: a crash stays a failure no matter what.
 | --- | --- |
 | `score` | Overall score, 0–100 |
 | `gate` | `passed` or `failed` |
-| `report-path` | Where the report was written |
+| `report-path` | Where the primary report was written |
+
+Consume them in later steps:
+
+```yaml
+- uses: RoLingG/fizzra@v0.1.3
+  id: scan
+
+- run: echo "Scored ${{ steps.scan.outputs.score }} (${{ steps.scan.outputs.gate }})"
+```
 
 ### Reading the result
 
