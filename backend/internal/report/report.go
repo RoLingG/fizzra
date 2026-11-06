@@ -211,11 +211,6 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifText       `json:"message"`
 	Locations []sarifLocation `json:"locations,omitempty"`
-	// PartialFingerprints 让 GitHub 跨提交认出同一个问题
-	//
-	// GitHub 只读 primaryLocationLineHash。缺了它 upload-sarif 会自己补，补出来的值
-	// 依赖仓库里同时有源码。补不上时同一个问题每次扫描都变成新告警，旧的自动关闭、新的重新出现
-	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
 }
 
 type sarifLocation struct {
@@ -273,13 +268,6 @@ func WriteSARIF(w io.Writer, r Report) error {
 			RuleID:  issue.Analyzer + ":" + issue.Rule,
 			Level:   sarifLevel(issue.Severity),
 			Message: sarifText{Text: issue.Message},
-		}
-		// 适配 GitHub 存下来的指纹跨扫描稳定，也不含行号
-		// 即便发现往下挪了几行仍然是同一个，也不会变成新告警
-		if issue.Fingerprint != "" {
-			result.PartialFingerprints = map[string]string{
-				"primaryLocationLineHash": issue.Fingerprint,
-			}
 		}
 		if issue.File != "" {
 			region := &sarifRegion{StartLine: max(issue.Line, 1)}
