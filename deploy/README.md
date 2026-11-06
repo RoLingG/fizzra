@@ -14,40 +14,58 @@ permissions:
   contents: read
   security-events: write   # only needed for the SARIF upload
 
-steps:
-  - uses: actions/checkout@v4
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
-  - uses: actions/setup-go@v5
-    with: { go-version: '1.27' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'   # must satisfy go.mod
 
-  - uses: rolingg/fizzra@v1
-    with:
-      analyzers: go            # optional; omit to run everything applicable
-      fail-on: critical,error
+      - uses: RoLingG/fizzra@v0.1.2
+        with:
+          fail-on: critical
 ```
 
 That is the whole integration. Removing the `uses:` line removes Fizzra; it
 writes nothing into your repository and does not change your workflow's
 triggers.
 
-**Fizzra does not install language toolchains.** Use the official setup
-actions (`actions/setup-go`, `actions/setup-python`, `actions/setup-node`) as
-you already do, then list the analyzers you want. This keeps tool versions under
+Pin the action to a release tag rather than to a branch, so an upstream change
+cannot alter your pipeline without you deciding to take it.
+
+**Fizzra does not install language toolchains.** Use the official setup actions
+(`actions/setup-go`, `actions/setup-python`, `actions/setup-node`) as you
+already do, then list the analyzers you want. This keeps tool versions under
 your control and avoids an action that silently pins a compiler for you.
 
-### Missing tools
+The Go toolchain version must satisfy the `go` directive in your `go.mod`.
+Fizzra runs `go vet` against your module, and that command refuses to run when
+the installed toolchain is older than the module declares.
 
-By default a scan that skipped analyzers because their tool was absent **fails**
-the step. That is deliberate: a green build that checked nothing is worse than a
-red one. The error names the missing tools.
+### What a skipped analyzer does
 
-While adopting, set `allow-skipped: true` to let those runs pass with a warning
-instead. Two things still fail even with it on:
+An analyzer whose tool is not installed is **skipped**, not failed. The scan
+carries on with the analyzers that can run, and the summary lists the skipped
+ones along with the missing tools:
 
-- an analyzer that **crashed or timed out** — that is a broken run, not a
-  missing tool
-- a scan where **no analyzer completed at all** — nothing was measured, so there
-  is nothing to pass
+```
+Note  skipped analyzers (tool not installed): golangci, gosec, staticcheck
+```
+
+This does **not** fail the step. A repository with only the Go toolchain
+installed still gets a score, just from fewer checks.
+
+Two cases do fail, because in both the result cannot be trusted:
+
+- **every** analyzer was skipped — nothing inspected the code, so the score
+  means nothing
+- an analyzer **crashed or timed out** — a broken run, not a missing tool
+
+Set `allow-skipped: true` to relax the first case into a pass. It does not
+relax the second: a crash stays a failure no matter what.
 
 ### Inputs
 
@@ -55,12 +73,12 @@ instead. Two things still fail even with it on:
 | --- | --- | --- |
 | `path` | `.` | Directory to scan |
 | `analyzers` | (all applicable) | Comma separated analyzer names |
-| `fail-on` | `critical,error` | Severities that fail the gate |
+| `fail-on` | `critical,error` | Severities that fail the gate. `warning` also passes unless raised |
 | `min-score` | from config | Override the minimum score |
-| `allow-skipped` | `false` | Pass when the only gap is missing tools |
+| `allow-skipped` | `false` | Pass when every analyzer was skipped for missing tools |
 | `format` | `sarif` | `sarif`, `json`, `html` or `text` |
 | `output` | by format | Report path |
-| `version` | `latest` | Release to download — **pin a tag in CI** |
+| `version` | `latest` | Release to download — pin a tag in CI |
 | `upload-sarif` | `true` | Upload with codeql-action |
 
 ### Outputs
@@ -70,6 +88,22 @@ instead. Two things still fail even with it on:
 | `score` | Overall score, 0–100 |
 | `gate` | `passed` or `failed` |
 | `report-path` | Where the report was written |
+
+### Reading the result
+
+The step's exit code is the gate. The summary in the log carries the score and
+the per-file findings, and the SARIF report lands under **Security → Code
+scanning**. Severity levels work like this:
+
+| Level | Fails the gate by default | Meaning |
+| --- | --- | --- |
+| `critical` | yes | A definite vulnerability or crash |
+| `error` | yes | A definite defect |
+| `warning` | no | Suspicious code; affects the score |
+| `info` | no | Advisory |
+
+A warning-level finding lowers the score without failing the build. To see
+lower scores enforced, set `min-score`; to make warnings fail, widen `fail-on`.
 
 ## The template workflow
 

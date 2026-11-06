@@ -32,6 +32,14 @@ inputs:
     description: 'Report format: sarif, json, html or text.'
     required: false
     default: 'sarif'
+  extra-formats:
+    description: >-
+      Additional formats to write after the scan, comma separated from sarif,
+      json, html. The main `format` still decides the gate and the SARIF
+      upload; these are generated from the same analysis and attached as a
+      single artifact, so producing all three costs one scan, not three.
+    required: false
+    default: ''
   output:
     description: >-
       Report path. Defaults to fizzra.sarif for sarif, fizzra.json for json
@@ -168,6 +176,55 @@ runs:
           echo "::error::Fizzra quality gate failed. Review the summary above and the report artefact."
         fi
         exit "$code"
+
+    # Runs even when the gate failed, so a red build still yields the same
+    # reports a green one would. `report --project` reuses the analysis the step
+    # above just wrote instead of scanning again.
+    - name: Write extra report formats
+      if: always() && inputs.extra-formats != ''
+      shell: bash
+      env:
+        INPUT_EXTRA: ${{ inputs.extra-formats }}
+        INPUT_PATH: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+
+        mkdir -p "$RUNNER_TEMP/fizzra/reports"
+
+        # `ci` registers the target under the base name of its absolute path, so
+        # the same name can be handed to --project below. That is what makes
+        # report reuse the analysis instead of scanning again; passing the path
+        # would trigger a second scan.
+        target=$(cd "$INPUT_PATH" && pwd)
+        proj=$(basename "$target")
+
+        # A failure here must not mask the gate result, so each report is best
+        # effort and the step never turns a red gate green.
+        for fmt in $(echo "$INPUT_EXTRA" | tr ',' ' '); do
+          case "$fmt" in
+            json) dest="$RUNNER_TEMP/fizzra/reports/fizzra.json" ;;
+            html) dest="$RUNNER_TEMP/fizzra/reports/fizzra-report.html" ;;
+            sarif) dest="$RUNNER_TEMP/fizzra/reports/fizzra.sarif" ;;
+            *) echo "::warning::unknown format '$fmt' in extra-formats, skipped"; continue ;;
+          esac
+
+          echo "::group::report $fmt"
+          if fizzra report --project "$proj" --format "$fmt" --output "$dest"; then
+            echo "wrote $dest"
+          else
+            echo "::warning::could not write the $fmt report"
+          fi
+          echo "::endgroup::"
+        done
+
+    - name: Upload reports
+      if: always() && inputs.extra-formats != ''
+      uses: actions/upload-artifact@v6
+      with:
+        name: fizzra-reports
+        path: ${{ runner.temp }}/fizzra/reports
+        retention-days: 14
+      continue-on-error: true
 
     # Uploaded before failing so the annotations are available precisely when
     # the gate is red. `if: always()` is what makes that ordering work.
