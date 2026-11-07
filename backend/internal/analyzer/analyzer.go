@@ -1,9 +1,7 @@
-// Package analyzer 定义 Fizzra 的分析器契约，以及所有内置和第三方分析器
-// 注册用的插件注册表
+// Package analyzer 定义 Fizzra 的分析器契约，以及所有内置和第三方分析器注册用的插件注册表
 //
 // 契约刻意做得很小，Name 加 Analyze。分析器需要宿主提供的一切（日志、超时、
-// 规则引擎、仓库根目录）都挂在 Context 上，这样日后再加能力也不会破坏已有的
-// 分析器
+// 规则引擎、仓库根目录）都挂在 Context 上，这样日后再加能力也不会破坏已有的分析器
 package analyzer
 
 import (
@@ -18,19 +16,15 @@ import (
 
 // Analyzer 是每个插件都必须满足的契约
 type Analyzer interface {
-	// Name 是在问题、配置和 API 中使用的稳定标识，在同一个注册表内必须唯一
-	// 且为小写（如 "golangci"）
+	// Name 是在问题、配置和 API 中使用的稳定标识，在同一个注册表内必须唯一且为小写（如 "golangci"）
 	Name() string
 	// Analyze 扫描 projectPath 并返回发现的问题
-	// 返回非 nil 错误会把该分析器本次运行标记为失败，随错误一起返回的部分结果
-	// 仍会被记录
+	// 返回非 nil 错误会把该分析器本次运行标记为失败，
+	// 随错误一起返回的部分结果仍会被记录
 	Analyze(ctx context.Context, projectPath string) ([]Issue, error)
 }
 
-// ContextAware 是可选接口，供需要宿主服务（规则引擎、文件集合、命令执行器、
-// 按工具的超时）而不仅仅是一个路径的分析器实现
-// 实现了它时框架优先走 AnalyzeWithContext，这样设计文档里的两方法契约依然
-// 成立，简单的分析器也永远不需要了解 Context
+// ContextAware 可选接口，供需要宿主服务（规则引擎、文件集合、命令执行器、按工具的超时）
 type ContextAware interface {
 	AnalyzeWithContext(ctx *Context) ([]Issue, error)
 }
@@ -43,8 +37,7 @@ func Invoke(a Analyzer, ctx *Context) ([]Issue, error) {
 	return a.Analyze(ctx, ctx.ProjectPath)
 }
 
-// Describable 是可选接口，分析器实现它以向界面暴露元数据（这个分析器检查
-// 什么），从而避免宿主写死一个按分析器名分支的 switch
+// Describable 可选接口，分析器实现它以向界面暴露元数据（这个分析器检查什么），避免宿主写死一个按分析器名分支的 switch
 type Describable interface {
 	Description() string
 	// Category 取值之一，lint、security、vulnerability、metrics、wails、custom
@@ -53,7 +46,7 @@ type Describable interface {
 	Requires() []string
 }
 
-// Probeable 是可选接口，供可以通过多个命令调到的工具实现
+// Probeable 可选接口，供可以通过多个命令调到的工具实现
 // 默认探测是对 Requires() 里的每个名字做 LookPath，对独立分发的二进制够用，
 // 但对只能作为语言模块安装的工具不够，Windows 上 pip 安装的脚本目录常常不在 PATH 上，
 // 而 `python -m ruff` 是可以用的。这种情况下报「缺失」是错的，
@@ -64,19 +57,16 @@ type Probeable interface {
 	ProbeCommands() [][]string
 }
 
-// Installable 是可选接口，供所需工具有固定安装命令的分析器实现
+// Installable 可选接口，供所需工具有固定安装命令的分析器实现
 // 没有它时，命令行只根据工具名拼出 `go install <tool>@latest`，这只对 Go 工具成立，
-// 问到 oxlint 这种 npm 包会立刻报 malformed module path
-// 一条跑不通的提示比没有提示更糟，因为它正是用户要照着执行的那一行
-// 提示放在这里而不是命令行里，因为它是工具的属性，而且对 npm 包来说因平台而异
+// 问到 oxlint 这种 npm 包会立刻报 malformed module path，避免出现一条跑不通的提示
 type Installable interface {
 	// InstallHint 返回一行说明如何安装该工具，没什么可说时返回空串
 	// 可以是多个备选方案，用换行分隔
 	InstallHint() string
 }
 
-// analyzerInstallHint 返回分析器的安装提示，未声明时返回空串，由调用方回退到
-// 通用猜测
+// analyzerInstallHint 返回分析器的安装提示，未声明时返回空串，由调用方回退到通用猜测
 func analyzerInstallHint(a Analyzer) string {
 	if a == nil {
 		return ""
@@ -87,7 +77,7 @@ func analyzerInstallHint(a Analyzer) string {
 	return ""
 }
 
-// ProjectScoped 是可选接口，供「工具装在项目里、而不是 PATH 上」的分析器实现
+// ProjectScoped 可选接口，供「工具装在项目里、而不是 PATH 上」的分析器实现
 //
 // 背景，可用性探测（Availability.Probe）是全局的，它只看某个命令名在不在 PATH 上。
 // 对 Go、Rust、Python 那类全局安装的工具这是准的，但对经 npx 调用的 npm 包就失效，
@@ -105,7 +95,7 @@ type ProjectScoped interface {
 	AvailableIn(projectPath string) bool
 }
 
-// LanguageScoped 是可选接口，供只处理特定语言的分析器实现
+// LanguageScoped 可选接口，供只处理特定语言的分析器实现
 //
 // 没有它时，每个注册的分析器都会对着每个项目运行，各自决定适不适用，Go 工具
 // 的包装器就是这样最后变成手写 go.mod 判断的。这样能work，但它是约定而不是
@@ -122,8 +112,7 @@ type LanguageScoped interface {
 
 // AnalyzerLanguages 报告分析器处理哪些语言
 //
-// 未实现 LanguageScoped 的分析器返回 nil，含义是「全部」，调用方不应把它读成
-// 「没有」
+// 未实现 LanguageScoped 的分析器返回 nil，含义是「全部」，调用方不应把它读成「没有」
 func AnalyzerLanguages(a Analyzer) []string {
 	if ls, ok := a.(LanguageScoped); ok {
 		return ls.Languages()
@@ -158,10 +147,10 @@ func analyzerAvailableIn(projectPath, name string) bool {
 	return hasLocalBinIn(projectPath, name)
 }
 
-// goOnly 供读取 Go 源码的分析器嵌入，省得每个都重复写同一个方法
+// goOnly 供读取 Go 源码的分析器嵌入，避免重复写同一个方法
 //
 // 目前所有内置分析器都限定 Go，工具包装器判断 go.mod，规则引擎、指标和 Wails
-// 检查也都遍历 Go 文件。新增语言靠在分析器里各自声明语言，而不是改这里
+// 检查也都遍历 Go 文件。新增语言靠在分析器里各自声明语言
 type goOnly struct{}
 
 func (goOnly) Languages() []string { return []string{modelLanguageGo} }
@@ -230,7 +219,7 @@ const modelLanguagePHP = "php"
 
 // Issue 是面向分析器的发现视图
 //
-// 它有意与 model.Issue 保持一致，但声明在这里，分析器因此不依赖持久层。
+// 与 model.Issue 保持一致，分析器因此不依赖持久层。
 // service 层负责两者之间的映射，并补上 ID、项目与分析归属和指纹
 type Issue struct {
 	Analyzer string
@@ -258,11 +247,7 @@ type Issue struct {
 	DependencyPath []string
 }
 
-// FixExample 对应 model.FixExample。分析器不接触持久层模型，所以类型声明在
-// 这里，由 service 层做映射
-//
-// 只报问题不给改法，读者还得自己想这条建议在他的代码里指什么，给个示例就省
-// 掉了这一步
+// FixExample 对应 model.FixExample
 type FixExample struct {
 	Before   string
 	After    string
@@ -275,8 +260,7 @@ func (f FixExample) HasContent() bool {
 	return f.Before != "" || f.After != ""
 }
 
-// Severity 对应 model.Severity
-// 在这里取别名是为了让分析器与存储保持解耦，和拆分出 Issue 同一个理由
+// Severity 对应 model.Severity，在这里取别名是为了让分析器与存储保持解耦
 type Severity = string
 
 // 分析器可返回的严重级别
@@ -314,8 +298,8 @@ type Context struct {
 	// Files 提供安全且尊重忽略规则的目录遍历
 	Files *FileSet
 	// Rules 是编译好的自定义规则引擎，分析器支持时才有
-	// 类型是 RuleEvaluator 而不是 rule 包，避免分析器包导入 rule（后者又导入
-	// model，会把存储类型拖进每个插件）
+	// 类型是 RuleEvaluator 而不是 rule 包，避免分析器包导入 rule
+	//（后者又导入 model，会把存储类型拖进每个插件）
 	Rules RuleEvaluator
 	// Options 按分析器名报告配置里的对应设置
 	//
@@ -328,8 +312,7 @@ type Context struct {
 	// Offline 表示是否应避免网络访问
 	//
 	// 与 Options 分开暴露，因为它是全局策略而不是某个分析器的开关，也因为它
-	// 要防的失败是看不见的，扫描器在离网机器上去连网络不会报错，会一直卡到
-	// socket 超时
+	// 要防的失败是看不见的，扫描器在离网机器上去连网络不会报错，会一直卡到 socket 超时
 	Offline bool
 }
 
@@ -367,12 +350,11 @@ type RuleEvaluator interface {
 	// AppliesTo 报告是否有已启用的规则可能匹配该路径
 	//
 	// 规则引擎用它避免读取不可能匹配的文件，自定义分析器用它区分「我查过这些
-	// 文件，它们是干净的」和「没有规则作用于这门语言，我什么都没查」，这两句话
-	// 摆到用户面前差别很大
+	// 文件，它们是干净的」和「没有规则作用于这门语言，我什么都没查」，避免语义问题
 	AppliesTo(relPath string) bool
 }
 
-// RuleMatch 对应 rule.Match，这么做是为了免去导入
+// RuleMatch 对应 rule.Match
 type RuleMatch struct {
 	Rule     string
 	Severity string
@@ -389,16 +371,16 @@ type RuleMatch struct {
 // 注册表
 // ---------------------------------------------------------------------------
 
-// Registry 持有可用的分析器。这是插件式架构，新增分析器只需注册一个构造函数，
-// 代码库中其他地方都不用改
+// Registry 持有可用的分析器
+// 插件式架构，新增分析器只需注册一个构造函数，代码库中其他地方都不用改
 type Registry struct {
 	mu        sync.RWMutex
 	factories map[string]Factory
 	order     []string
 }
 
-// Factory 构造分析器实例。用构造函数而不是注册实例，是为了每次分析都拿到一个
-// 全新、未被污染的分析器
+// Factory 构造分析器实例
+// 用构造函数而不是注册实例，是为了每次分析都拿到一个全新、未被污染的分析器
 type Factory func() Analyzer
 
 // NewRegistry 返回空注册表
@@ -422,11 +404,7 @@ func (r *Registry) Register(f Factory) {
 	}
 	r.factories[name] = f
 
-	// 按序插入而不是追加后再排序
-	//
-	// order 始终以有序列表被读取，插入排序让每次注册保持 O(n) 而不是
-	// O(n log n)。九个分析器时这点差别测不出来，但「追加再整体排序」这种写法
-	// 容易被复制到某个循环里，那时就真有影响了
+	// 按序插入而不是追加后再排序，避免循环内复制这一性能问题
 	idx, _ := slices.BinarySearch(r.order, name)
 	r.order = slices.Insert(r.order, idx, name)
 }
@@ -440,8 +418,7 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-// New 实例化指定的分析器。未知名称会报错而不是静默忽略，配置里的拼写错误因此
-// 能立刻暴露
+// New 实例化指定的分析器，未知名称会报错而不是静默忽略
 func (r *Registry) New(names []string) ([]Analyzer, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -472,12 +449,10 @@ func (r *Registry) New(names []string) ([]Analyzer, error) {
 
 // NewForLanguage 实例化指定的分析器中适用于某语言的那些
 //
-// 这是引擎应该使用的入口。New 保留给没有项目上下文的调用方（可用性探测、
-// 测试），返回全部
+// 这是引擎应该使用的入口。New 保留给没有项目上下文的调用方（可用性探测、测试），返回全部
 //
 // 过滤是必要的，否则分析器会被盲目地对着每个项目运行，一个 Go 工具包装器指向
-// Rust 代码树，要么空转，要么更糟，从一个没东西可看的工具里报出一堆废话。在
-// 这之前，唯一阻止这件事的办法是每个分析器记得自己判断，忘了的就静默返回零
+// Rust 代码树，要么空转，要么更糟。在这之前，每个分析器需自行判断，忘了就静默返回零
 //
 // 未知名称即使会被过滤掉也仍然报错，配置里的拼写错误因此不会被语言检查吞掉
 func (r *Registry) NewForLanguage(names []string, lang string) ([]Analyzer, error) {
@@ -495,8 +470,7 @@ func (r *Registry) NewForLanguage(names []string, lang string) ([]Analyzer, erro
 	return out, nil
 }
 
-// SkippedForLanguage 列出对某语言不会运行的已注册分析器，调用方因此能解释
-// 空扫描，而不是把它报成干净的
+// SkippedForLanguage 列出对某语言不会运行的已注册分析器，调用方因此能解释空扫描
 func (r *Registry) SkippedForLanguage(lang string) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -537,13 +511,12 @@ func (r *Registry) Describe() []Descriptor {
 	return out
 }
 
-// OptionProvider 是可选接口，供向界面暴露可调设置的分析器实现
+// OptionProvider 可选接口，供向界面暴露可调设置的分析器实现
 //
-// 存在的理由和 Describable 一样，面板应该为每个设置生成一个控件，而不是给每个
-// 分析器写死一张表单。分析器在这里声明一个开关，界面就会渲染出来
+// 面板应该为每个设置生成一个控件，而不是给每个分析器写死一张表单
+// 分析器在这里声明一个开关，界面就会渲染出来
 type OptionProvider interface {
-	// Options 列出该分析器的设置，每项含默认值和一段描述，描述要写给运维人员
-	// 看，而不是写给工具作者看
+	// Options 列出该分析器的设置，每项含默认值和一段描述
 	Options() []DescriptorOption
 }
 
@@ -552,11 +525,9 @@ type DescriptorOption struct {
 	// Key 是设置名，在配置里写作 analyzerOptions.<analyzer>.<key>，
 	// 也是设置接口接受的 JSON 字段名
 	Key string `json:"key"`
-	// Default 是未配置时的取值。暴露它是为了让界面显示开关复位后的状态，
-	// 也让读者能看出哪些行为默认是关的
+	// Default 是未配置时的取值
 	Default bool `json:"default"`
-	// Description 说明启用该选项会做什么，用的是运维人员据以判断的说法，
-	// 而不是底层工具的叫法
+	// Description 说明启用该选项会做什么
 	Description string `json:"description"`
 }
 
@@ -566,8 +537,7 @@ type Descriptor struct {
 	Description string   `json:"description"`
 	Category    string   `json:"category"`
 	Requires    []string `json:"requires"`
-	// Languages 列出该分析器处理的语种，为空表示全部。暴露它是为了让面板显示
-	// 一个项目实际会跑哪些检查，而不是暗示每个分析器都适用于一切
+	// Languages 列出该分析器处理的语种，为空表示全部
 	Languages []string `json:"languages,omitempty"`
 	// Options 列出可调设置，没有时为空
 	Options []DescriptorOption `json:"options,omitempty"`
@@ -605,29 +575,15 @@ type ExitError struct {
 	Stderr   string
 	Stdout   []byte
 	TimedOut bool
-	// Timeout 是实际应用于该命令的预算，只在 TimedOut 为真时设置
-	//
-	// 记在这里而不是在调用处读 Context.ToolTimeout，因为两者并不是同一个数。
-	// 调用方可能用更短的截止时间运行命令，此时超出的并不是扫描配置里的预算，
-	// 报出去会变成「一秒就被杀掉，却说 3m0s 超时」，把读者引去调一个根本没碰到的
-	// 上限
+	// Timeout 实际应用于该命令的预算，只在 TimedOut 为真时设置
 	Timeout time.Duration
-	// Cancelled 在本次运行的 context 被外部取消时设置，比如关闭扫描，或整个
-	// 扫描层的超时
-	//
-	// 之所以要区分，是因为这两种情况不是同一种失败，按工具的超时说明这个工具
-	// 比它的预算慢，解决办法是调高预算或排除该工具，扫描被取消则与工具毫无关系，
-	// 说成超时会把读者引到错误的旋钮上。取消与截止时间要分开判断，这样普通的
-	// 按工具超时（它同样是 context 被取消）才能保住自己的提示
+	// Cancelled 在本次运行的 context 被外部取消时设置，比如关闭扫描，或整个扫描层的超时
 	Cancelled bool
 }
 
 // Error 渲染一条给读扫描摘要的人看的消息
 //
-// 完整命令行和全部 stderr 属于调试日志，不该放进一行摘要，golangci-lint 在编译
-// 不过的项目上会打印好几段类型检查错误，把这些全贴进摘要，用户真正需要的那句
-// 「main redeclared」就被淹没了
-//
+// 完整命令行和全部 stderr 属于调试日志，不该放进一行摘要
 // 命令名和退出码保留，它们能指出是什么失败了
 func (e *ExitError) Error() string {
 	if e.TimedOut {

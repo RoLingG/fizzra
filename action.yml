@@ -72,6 +72,9 @@ outputs:
   report-path:
     description: 'Where the report was written.'
     value: ${{ steps.scan.outputs.report-path }}
+  project:
+    description: 'The name the scanned directory was registered under.'
+    value: ${{ steps.scan.outputs.project }}
 
 runs:
   using: 'composite'
@@ -138,7 +141,7 @@ runs:
       run: |
         set -euo pipefail
 
-        args=(ci "$INPUT_PATH" --format "$INPUT_FORMAT")
+        args=(ci "$INPUT_PATH" --format "$INPUT_FORMAT" --print-project)
 
         case "$INPUT_FORMAT" in
           sarif) default_out=fizzra.sarif ;;
@@ -158,19 +161,26 @@ runs:
         if [ -n "$INPUT_MIN_SCORE" ]; then args+=(--min-score "$INPUT_MIN_SCORE"); fi
         if [ "$INPUT_ALLOW_SKIPPED" = true ]; then args+=(--allow-skipped); fi
 
-        echo "report-path=$out" >> "$GITHUB_OUTPUT"
+        # Only advertise a path when one was actually written
+        if [ -n "$out" ]; then
+          echo "report-path=$out" >> "$GITHUB_OUTPUT"
+        fi
 
         # Capture the summary so the workflow log carries the score even when
         # the gate fails; the step's own exit code still decides the outcome.
+        # 2>&1 keeps the `project:` line and the analyzer log in one file.
         set +e
-        fizzra "${args[@]}" | tee "$RUNNER_TEMP/fizzra/scan.log"
+        fizzra "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/fizzra/scan.log"
         code=${PIPESTATUS[0]}
         set -e
 
         score=$(sed -n 's/^ *Score *\([0-9.]*\)\/100.*/\1/p' "$RUNNER_TEMP/fizzra/scan.log" | head -1)
         gate=$(sed -n 's/^ *Result *\([A-Za-z]*\).*/\1/p' "$RUNNER_TEMP/fizzra/scan.log" | head -1 | tr '[:upper:]' '[:lower:]')
+        # 项目名不一定是目录名，重名时会被追加哈希，后续步骤靠这个名字取报告
+        proj=$(sed -n 's/^project: //p' "$RUNNER_TEMP/fizzra/scan.log" | head -1)
         echo "score=${score}" >> "$GITHUB_OUTPUT"
         echo "gate=${gate}" >> "$GITHUB_OUTPUT"
+        echo "project=${proj}" >> "$GITHUB_OUTPUT"
 
         if [ "$code" -ne 0 ]; then
           echo "::error::Fizzra quality gate failed. Review the summary above and the report artefact."
@@ -185,18 +195,19 @@ runs:
       shell: bash
       env:
         INPUT_EXTRA: ${{ inputs.extra-formats }}
-        INPUT_PATH: ${{ inputs.path }}
+        INPUT_PROJECT: ${{ steps.scan.outputs.project }}
       run: |
         set -euo pipefail
 
         mkdir -p "$RUNNER_TEMP/fizzra/reports"
 
-        # `ci` registers the target under the base name of its absolute path, so
-        # the same name can be handed to --project below. That is what makes
-        # report reuse the analysis instead of scanning again; passing the path
-        # would trigger a second scan.
-        target=$(cd "$INPUT_PATH" && pwd)
-        proj=$(basename "$target")
+        # 用扫描时实际注册的名字，而不是目录名：目录同名时注册名会被追加哈希，
+        # 用目录名取报告会拿到另一个项目
+        proj="$INPUT_PROJECT"
+        if [ -z "$proj" ]; then
+          echo "::warning::the scan did not report a project name, skipping extra formats"
+          exit 0
+        fi
 
         # A failure here must not mask the gate result, so each report is best
         # effort and the step never turns a red gate green.

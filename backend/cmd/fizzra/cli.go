@@ -662,6 +662,8 @@ func cmdCI(app *App, cfg *config.Config, args []string) int {
 			ci.SkipGate = true
 		case "--allow-skipped":
 			ci.AllowSkipped = true
+		case "--print-project":
+			ci.PrintProject = true
 		default:
 			ciArgs = append(ciArgs, args[i])
 		}
@@ -693,6 +695,11 @@ func cmdCI(app *App, cfg *config.Config, args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load issues: %v\n", err)
 		return 1
+	}
+
+	// 走 stderr，和报告正文分开，调用方 grep 这一行前缀即可
+	if ci.PrintProject {
+		fmt.Fprintf(os.Stderr, "project: %s\n", project.Name)
 	}
 
 	// 先输出机器可读的产物，这样只看文件的 CI 系统即使下面门禁失败也仍能拿到它
@@ -801,6 +808,11 @@ type ciConfig struct {
 	// 结论会变；而缺工具是环境准备问题，CI 模板里常常是用户漏了一步 setup。
 	// 这个区分让前者的信号不被后者淹没
 	AllowSkipped bool
+	// PrintProject 把本次扫描注册的项目名输出到 stdout
+	//
+	// 项目名不一定等于目录名，重名时会被追加哈希。调用方想对同一次扫描再取报告，
+	// 只能靠这个名字，猜目录名会在目录同名时取到另一个项目
+	PrintProject bool
 }
 
 // evaluateCIGate 把存储的门禁与命令行覆盖合到一起
@@ -895,6 +907,8 @@ Flags:
   --allow-skipped        Exit 0 when the only gap is analyzers skipped for a
                          missing tool. Crashes and timeouts still fail, and a
                          scan where nothing ran never passes
+  --print-project        Print the registered project name to stderr, for
+                         callers that need to address the same scan again
   --timeout <dur>        Overall budget (default 15m)
 
 Examples:
