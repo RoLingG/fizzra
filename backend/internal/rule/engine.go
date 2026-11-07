@@ -203,12 +203,10 @@ func (e *Engine) Evaluate(relPath string, content []byte) []Match {
 
 	// 规则自身修改前后示例里的行会被压制
 	//
-	// 修复示例必须展示**有问题的**代码才有用，那正是「before」的含义。没有这条
-	// 压制，内置规则库会把自己的示例报成缺陷，用 Fizzra 扫描它自己，会为
-	// 它自己文档里那两段 `exec.Command("sh", ...)` 和
-	// `InsecureSkipVerify: true` 产生两条严重发现
+	// 修复示例必须展示有问题的代码才有用，那正是 before 的含义。没有这条压制，
+	// 内置规则库会把自己的示例报成缺陷
 	//
-	// 压制范围限定在扫描文件中字面上位于 FixExample 原始字符串里的那些行，所以它
+	// 压制范围限定在扫描文件里字面上位于 FixExample 原始字符串中的那些行，
 	// 藏不住别处的真问题
 	demos := demonstrationLines(lines)
 
@@ -309,17 +307,12 @@ func (r Rule) accepts(ctx matchContext, line string, loc []int, syntax Syntax) b
 		return false
 	}
 
-	// 在**关键字**所在的位置检查字符串字面量状态，而不是整个正则匹配的起点。
+	// 在关键字所在的位置检查字符串字面量状态，而不是整个正则匹配的起点
 	//
-	// 模式常以 `(^|[^\w.])` 这样的边界组开头，为的是让 `panic(` 不会也匹配
-	// `x.panic(`。那个组会吃掉关键字左边的一个字符，对这样一行来说：
-	//
-	//     Message: "panic() called outside initialisation",
-	//
-	// 吃掉的正是开引号。检查匹配起点会得出「不在字符串里」，因为第 13 位就是那个
-	// 引号本身。关键字从后一位开始，而**那个**位置才在字面量内部。
-	//
-	// 所以我们两个偏移都测，任一位于字面量内，该匹配就是文本而不是代码
+	// 模式常以 (^|[^\w.]) 这样的边界组开头，让 panic( 不会也匹配 x.panic(。那个组
+	// 会吃掉关键字左边的一个字符，对 `Message: "panic() called ..."` 来说吃掉的正是
+	// 开引号。以匹配起点检查会得出「不在字符串里」，而关键字从后一位开始，那个位置
+	// 才在字面量内部。因此两个偏移都测，任一在字面量内即视为文本
 	keywordStart := loc[0]
 	if loc[1] > loc[0] {
 		matched := line[loc[0]:loc[1]]

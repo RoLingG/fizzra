@@ -299,20 +299,13 @@ func (a *VulnerabilityAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, erro
 		return nil, ErrToolUnavailable("govulncheck (no go.mod in project root)")
 	}
 
-	// 离线模式，跳过而不运行
+	// 离线时跳过而不是运行
 	//
-	// 与 cargo-audit 不同，govulncheck 没有「用已有数据、不联网」这种开关，
-	// 它唯一的网络参数 -db 指向的是另一个数据库，而不是避开数据库。它会在
-	// GOMODCACHE 下留一份本地副本，但没有任何办法区分「副本是热的」和「副本
-	// 是空的」。如果机器上既没有副本又连不上 vuln.go.dev，运行会一直阻塞到
-	// socket 超时
+	// govulncheck 没有「用已有数据、不联网」的开关，它唯一的网络参数 -db 指向另一个
+	// 数据库，而不是避开数据库。连不上 vuln.go.dev 时它会一直阻塞到 socket 超时，
+	// 所以离线只能跳过。跳过会被单独记录，不会被误读成「没有发现漏洞」
 	//
-	// 所以只能二选一，等它超时拿一个未知结果，或者干脆不报告。跳过是更诚实
-	// 的选择，它会在分析结果里体现出来（引擎把跳过的分析器与失败的分开记录），
-	// 也不会被误当成「没有发现漏洞」，而超时的运行恰恰会退化成那个样子
-	//
-	// 注意顺序，这段放在工具存在性检查之后，这样未安装的工具仍然报告为未安装，
-	// 而不是被当成离线跳过
+	// 顺序要紧：这段放在工具存在性检查之后，未安装的工具因此仍报未安装，而不是离线
 	if actx.Offline || actx.OptionBool(a.Name(), "offline", false) {
 		return nil, ErrNothingToCheck("offline mode: govulncheck needs network access to the Go vulnerability database")
 	}

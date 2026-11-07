@@ -223,32 +223,13 @@ var ruffBasePrefixes = []string{
 	"PLE", // pylint errors (not the style half)
 }
 
-// ruffCheckArgs 构造 `ruff check` 的参数列表
+// ruffCheckArgs 构造 ruff check 的参数列表
 //
-// 从分析器里抽出来，测试因此可以在没装 ruff 的情况下断言它
+// 默认规则集只有风格检查，eval 和 os.system 这类问题走的是 bandit 的 S 规则，
+// 不开就一条都不报，所以基础集显式包含安全规则，其余分组按配置追加
 //
-// # 规则集
-//
-// ruff 默认只查风格，所以一个含有 eval() 和 os.system() 的文件报不出任何安全问题，
-// 源自 bandit 的 S 规则默认不开，读者看到「0 个问题」会以为代码是安全的。
-// --select ALL 能解决这点，但会把风格类规则和海量文档检查堆上来，盖过真正的缺陷。
-// 所以规则集是基础类别加上运维自行启用的可选分组，各分组的内容见 ruffRuleGroups
-//
-// # 排除项
-//
-// 测试文件被排除，理由 Go 规则库已经写明，测试套件做的事情，生产代码合法地
-// 不该做。S101 的存在是因为 python -O 会把 assert 从生产代码里剥掉，
-// 在测试里 assert 本身就是那个测试
-//
-// 这里有两个陷阱
-//
-//   - 必须用 --extend-exclude 而不是 --exclude。后者是替换 ruff 的默认排除项
-//     而不是追加，而默认项正是跳过 .venv、site-packages 和 __pycache__ 的那一批。
-//     用 --exclude 会让分析器去遍历项目已安装的依赖
-//   - 匹配模式用裸名字，不能写成 **/name。含 **/ 的模式会破坏 ruff 的目录剪枝，
-//     .venv 里的文件会被全部扫进来。裸形式排除同样的文件，又不动默认项
-//
-// opts 是每个分析器的配置，nil 表示使用默认值
+// 排除项用 --extend-exclude 而不是 --exclude，后者会替换掉 ruff 的默认排除，让分析器
+// 去遍历 .venv 和 site-packages。模式写裸名字，**/name 会破坏 ruff 的目录剪枝
 func ruffCheckArgs(opts func(key string) (string, bool)) []string {
 	args := []string{
 		"check",

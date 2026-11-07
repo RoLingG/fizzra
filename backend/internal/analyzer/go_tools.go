@@ -197,7 +197,7 @@ func (a *GolangciAnalyzer) Description() string {
 func (a *GolangciAnalyzer) Category() string   { return "lint" }
 func (a *GolangciAnalyzer) Requires() []string { return []string{"golangci-lint"} }
 
-// golangciJSON 是我们用到的 `golangci-lint run --out-format json` 输出的子集
+// golangciJSON 是 `golangci-lint run --out-format json` 输出中用到的子集
 type golangciJSON struct {
 	Issues []struct {
 		FromLinter  string   `json:"FromLinter"`

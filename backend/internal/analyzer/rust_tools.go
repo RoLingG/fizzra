@@ -14,13 +14,11 @@ import (
 
 // Rust 分析，基于 clippy
 //
-// clippy 随 Rust 工具链分发，不是独立二进制，所以 Rust 开发者本来就有它，除了
-// rustup component add clippy 之外不需要装什么，版本也随编译器走不必单独固定。
-// 这使它成为该生态里接入成本最低的有用工具
+// clippy 随 Rust 工具链分发，不是独立二进制，rustup component add clippy 之后即可用，
+// 版本随编译器走，不必单独固定
 //
-// 注意 Rust 没有 golangci-lint 的对应物。clippy 负责 lint，依赖漏洞要靠
-// cargo-audit 或 cargo-deny 作为第二个分析器。这是生态的样子，不是本集成的
-// 缺失
+// Rust 没有 golangci-lint 的对应物：clippy 负责 lint，依赖漏洞要靠 cargo-audit
+// 作为第二个分析器
 
 // ClippyAnalyzer 运行 cargo clippy
 type ClippyAnalyzer struct{ rustOnly }
@@ -268,15 +266,14 @@ func parseClippyJSONLines(out []byte, snippets *SnippetReader) (issues []Issue, 
 
 // clippyFix 提取 rustc 提供的可直接套用建议，没有则返回零值
 //
-// 建议几乎从不出现在主 span 上，而是在子诊断里，也就是 message 为建议的
-// help 项（"using `!is_empty` is clearer and more explicit" 对应 `!v.is_empty()`）
+// 建议几乎不出现在主 span 上，而是在子诊断里，也就是 message 为建议的 help 项
+// （"using `!is_empty` is clearer and more explicit" 对应 `!v.is_empty()`），
 // 所以要遍历 children
 //
-// 示例的两半都直接来自 span 本身，text 是写下的代码，suggested_replacement 是
-// 用来替换它的内容。不需要推断，也不需要读文件，这也是它不接收 SnippetReader
-// 的原因
+// 示例的两半都直接来自 span 本身：text 是写下的代码，suggested_replacement 是替换
+// 它的内容，不需要读文件
 //
-// 没有可用建议时返回零值。多数 lint 都没有建议，而建议只是文字描述的 lint
+// 多数 lint 都没有建议，建议只是文字描述的 lint 返回零值
 // （比如「考虑改用迭代器」）不能被包装成修改前后对照
 func clippyFix(msg clippyMessage) FixExample {
 	// 只有 MachineApplicable 的建议是编译器有把握的改写。MaybeIncorrect 和
@@ -468,14 +465,9 @@ func (a *RustfmtAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 
 // parseRustfmtDiff 提取 rustfmt 会改动的文件
 //
-// 输出是每个文件一段 unified diff，由这样一行引出：
-//
-//	Diff in <path>:<line>:
-//
-// 路径是绝对路径，Windows 上还带 `\?\` 前缀（verbatim 路径形式），所以上报
-// 前要先转成相对 crate 的路径。只需要这个头，diff 正文本身就是改法，把它重复
-// 到问题消息里只会淹没这条发现。读者会被指到那个文件，编辑器保存时的自动格式
-// 化会完成剩下的工作
+// 输出是每个文件一段 unified diff，由 `Diff in <path>:<line>:` 一行引出。路径是
+// 绝对路径，Windows 上还带 \?\ 前缀，上报前要转成相对 crate 的路径。只取这个头，
+// diff 正文本身就是改法，重复到消息里只会淹没这条发现
 func parseRustfmtDiff(out []byte, crateDir string) []Issue {
 	var issues []Issue
 	seen := map[string]bool{}

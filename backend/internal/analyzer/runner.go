@@ -139,13 +139,8 @@ func (r *ExecRunner) Run(ctx context.Context, dir, name string, args ...string) 
 	// 截止时间检查必须放在最前
 	//
 	// context 的截止时间杀掉进程时，Go 既把它报成 *exec.ExitError（被信号杀死），
-	// 又设置 ctx.Err()。所以先测退出错误会把每一次超时都吞掉，TimedOut 保持
-	// false，IsTimeout 返回 false，每个分析器都把一个其实是被我们自己的预算杀掉
-	// 的进程报成「工具失败」。下面那个 DeadlineExceeded 分支，对它本来要处理的
-	// 情况实际上不可达
-	//
-	// 这件事的影响不止于措辞，没被识别成超时的超时就是一个普通失败，而正是普通
-	// 失败让分析器此前能从报告里消失且毫无解释
+	// 又设置 ctx.Err()。先测退出错误会把每一次超时都吞掉：TimedOut 保持 false，
+	// IsTimeout 返回 false，被自身预算杀掉的进程被报成工具有问题
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		exitErr.TimedOut = true
 		exitErr.Code = -1

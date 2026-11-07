@@ -10,8 +10,7 @@ import (
 
 // JavaScript 与 TypeScript 分析，基于 Biome
 //
-// Biome 是与 oxlint 并存的第二个 linter，不是替代品。两者都是无需项目配置的
-// 原生二进制，所以接入前拿同一个文件对比过，结论是互补而非重复
+// Biome 与 oxlint 并存而不是互相替代，两者互补：
 //
 //	                           oxlint   biome
 //	if (x = 1)  noAssignInExpressions     -      yes
@@ -20,9 +19,6 @@ import (
 //	no-explicit-any                      yes      yes
 //
 // 前三项是正确性错误，oxlint 的默认规则集不启用，Biome 的默认集启用
-//
-// 下面的字段都是对照真实的 `biome check --reporter=json` 输出确认的，不是照
-// 文档写的
 
 // BiomeAnalyzer 运行 Biome 的 linter
 type BiomeAnalyzer struct{ javascriptOnly }
@@ -265,15 +261,11 @@ type biomeInvocation struct {
 
 // biomeCommand 定位 Biome，优先用 PATH 上的安装而不是 npx
 //
-// 用 npx --no-install 而不是裸 npx，因为 npm 上不带作用域的 biome 包是一个毫不
-// 相干、早已废弃的 0.3.x 版本，npx biome 装的是那个而不是 Biome。--no-install
-// 还能防止运行中静默下载一个项目并未选择的 linter
+// npx 必须带 --no-install：npm 上不带作用域的 biome 包是另一个早已废弃的 0.3.x 版本，
+// 而 --no-install 也防止运行中静默下载一个项目并未选择的 linter
 //
-// 两处都找不到时报工具缺失，而不是把命令交给 npx。这是这个函数里唯一非显而易见
-// 的一点，npx 在包不存在时会输出一坨 npm 的错误并返回非零，调用方无从把它和
-// 「biome 自己崩了」区分开，于是「没装 biome」被报成了扫描失败，那要求读者从
-// npm 的报错里自己推断该装什么。而这个项目里，「工具没装」和「项目里有问题」是
-// 两类不同的提示，前者要装东西，后者要改代码
+// 两处都找不到时报工具缺失，不把命令交给 npx。npx 在包不存在时会输出 npm 的错误并
+// 返回非零，调用方无法把它和 biome 自己崩溃区分开，“没装工具”就会被报成扫描失败
 func biomeCommand(actx *Context) (biomeInvocation, error) {
 	if path, err := LookCandidates(actx.Runner, "biome", "biome.cmd"); err == nil {
 		return biomeInvocation{name: path}, nil

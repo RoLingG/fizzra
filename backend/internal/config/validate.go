@@ -77,16 +77,12 @@ const analyzerOptionsPath = "scan.analyzerOptions"
 
 // knownAnalyzerOptionKeys 把每个分析器名映射到它接受的选项键
 //
-// 从分析器那边复制过来而不是导入，因为 internal/analyzer 是个很大的包，而配置是
-// 所有东西都要加载的。为了回答「这个键合法吗」而把它拖进来，会让配置层依赖整个
-// 分析栈
+// 从分析器那边复制过来而不是导入：internal/analyzer 是很大的包，而配置层是所有
+// 东西都要加载的，为了回答「这个键合法吗」把它拖进来，会让配置依赖整个分析栈。
+// 代价是分析器新增选项时要同步这张表，否则该选项在 YAML 里静默不可用
 //
-// 这份复制由 TestAnalyzerOptionKeysMatchTheAnalyzers 把关，它会遍历真实的注册表
-// 并在两者脱节时报错。正因为有这个测试，这张表放在这里才是安全的，没有它，在
-// 分析器里新增一个选项会让它在 YAML 中静默不可用，而那恰恰是本段代码要修的 bug
-//
-// 两个要联网的分析器都列了 offline。它在 scan.offline 有全局等价物，也声明在
-// 各自的 Options() 里，所以面板上也会提供它，配置与接口接受同一批键
+// 两个要联网的分析器都列了 offline，与 scan.offline 的全局设置等价，配置与接口
+// 因此接受同一批键
 var knownAnalyzerOptionKeys = map[string][]string{
 	"ruff": {"style", "docstrings", "annotations", "copyright", "naming",
 		"pandas", "quotes", "todo"},

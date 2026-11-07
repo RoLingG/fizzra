@@ -1107,14 +1107,12 @@ func (s *Service) Info(ctx context.Context) SystemInfo {
 
 // ScanPreflight 报告一次扫描启动前用户需要知道的事
 //
-// 只回答一个问题，这个项目**该跑**的分析器里，有几个因为工具缺失跑不了
+// 只回答一个问题：这个项目该跑的分析器里，有几个因为工具缺失跑不了
 //
-// 「该跑」按项目语言算。一台机器上装的分析器覆盖各种语言，而一次扫描只用其中一部分，
-// 不做这层过滤，一个 JavaScript 项目会被告知缺十一个 Go / Rust / Python 工具，
-// 把真正缺的那个淹掉
+// 「该跑」按项目语言算。一台机器上的分析器覆盖各种语言，不做这层过滤，一个
+// JavaScript 项目会被告知缺十一个 Go / Rust / Python 工具，把真正缺的那个淹掉
 //
-// Analyzers 是可用的那些，供界面展示将检查什么。Blocked 是无法运行的，每项带着
-// 分析器自己声明的安装方法
+// Analyzers 是可用的那些，Blocked 是无法运行的，每项带着分析器自己声明的安装方法
 func (s *Service) ScanPreflight(ctx context.Context, projectID string) (*ScanPreflight, error) {
 	project, err := s.ResolveProject(ctx, projectID)
 	if err != nil {

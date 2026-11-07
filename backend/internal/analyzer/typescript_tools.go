@@ -16,17 +16,14 @@ import (
 
 // TypeScript 类型检查，使用项目自己的编译器
 //
-// 这个分析器与集合里其他所有都不同，它不做 lint，它做编译。由此有三点后果，
-// 本文件其余部分都围绕它们展开
+// 这个分析器做的是编译而不是 lint，由此有三点约束：
 //
-//   - 它需要项目的 tsconfig.json。类型检查只有对照项目自己的严格度设置才有意义。
-//     用默认设置运行，既会产生用户构建不认为是错误的发现，也会漏掉它认为是的那些
-//   - 它用项目自己的编译器，不是我们的一份。tsc 是项目的 devDependency，
-//     版本就是项目固定的那个。通过 npx --no-install 解析会运行本地那份，
-//     而重新实现一个类型检查器正是那种不存在的东西（见下方关于
-//     oxlint --type-check 的说明）
-//   - 它慢。完整的类型检查是秒级而不是毫秒级。但它仍是 JS/TS 里价值最高的
-//     单项检查，oxlint 的类型相关规则覆盖不到它
+//   - 需要项目的 tsconfig.json。类型检查只有对照项目自己的严格度才有意义，用默认
+//     设置既会报出用户构建不认为是错误的问题，也会漏掉它认为是的问题
+//   - 用项目自己的编译器。tsc 是项目的 devDependency，通过 npx --no-install 解析到
+//     本地那份，版本与项目构建时一致
+//   - 慢。完整类型检查是秒级而不是毫秒级，但它仍是 JS/TS 里价值最高的单项检查，
+//     oxlint 的类型相关规则覆盖不到它
 
 // TscAnalyzer 以只检查模式运行 TypeScript 编译器
 type TscAnalyzer struct{ javascriptOnly }
@@ -225,17 +222,13 @@ var binSuffixes = func() []string {
 
 // typescript7Hint 在项目用的是 TypeScript 7 时给出一句解释，否则返回空串
 //
-// 背景，TS 7 是 Go 重写的原生编译器，它不提供编程接口，也不提供插件机制。vue-tsc
-// 依赖 TS 6 及以下的 JS API（它会 require typescript/lib/tsc，而 TS 7 的
-// package.json 不再导出这个路径），所以在 TS 7 项目上直接崩掉，抛的是 Node 的
-// 模块解析错误，不是类型诊断
+// TS 7 是 Go 重写的原生编译器，不提供编程接口也不提供插件机制。vue-tsc 依赖
+// typescript/lib/tsc 这个导出路径，TS 7 的 package.json 不再提供它，于是在这类项目
+// 上 vue-tsc 直接崩在模块解析，抛出的不是类型诊断。命令交给项目自己的 vue-tsc 执行，
+// 调用方无法绕过。上游计划在 TS 7.1 恢复
 //
-// 这不是能靠调整我们这边的调用方式绕过的，编译器命令是交给项目自己的 vue-tsc 跑的，
-// 而它在这个版本组合下根本起不来。上游把恢复的时间点放在 TS 7.1（等 tsc 支持
-// content mappers 之后直接读 .vue，vue-tsc 届时会被弃用）
-//
-// 提示只在失败之后给出，不提前按版本号预测，项目里可能已经换了别的检查器，按版本号
-// 预警会在一切正常的项目上报假警。所以判据是「确实崩了」加上「版本确实是 7」
+// 只在失败之后给出提示，不按版本号提前预警：项目里可能已经换了别的检查器，按版本预警
+// 会在一切正常的项目上报假警
 func typescript7Hint(actx *Context) string {
 	major := localTypeScriptMajor(actx.ProjectPath)
 	if major < 7 {
