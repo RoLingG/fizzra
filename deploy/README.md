@@ -216,10 +216,10 @@ with-analyzers: all                    # every language below
 | Go | gofmt, govet | `gofmt`, `go` | part of the Go toolchain | |
 | JS/TS | oxlint | `oxlint` | `npm i -g oxlint` | Or `npx` from the project's `node_modules`. |
 | JS/TS | biome | `biome` | `npm i -g @biomejs/biome` | |
-| JS/TS | tsc | `npx` (project's TypeScript) | `npm i -g typescript` | Also needs `vue-tsc` for `.vue` files. |
+| JS/TS | tsc | `npx` (project's TypeScript) | `npm install --save-dev typescript` in the project | Also needs `vue-tsc` for `.vue` files. Installing globally has no effect: the analyzer runs the project's own compiler. |
 | Python | ruff | `ruff` | `pip install ruff` | Falls back to `python -m ruff`. |
 | Rust | clippy, rustfmt | `cargo` | `rustup component add clippy rustfmt` | |
-| Rust | cargo-audit | `cargo-audit` | `cargo install cargo-audit` | Needs network unless `--offline`. |
+| Rust | cargo-audit | `cargo-audit` | `cargo install cargo-audit --locked` | Needs network unless `--offline`. |
 | Java | pmd | `pmd` | download `pmd-dist-*-bin.zip` from https://github.com/pmd/pmd/releases, add `bin/` to PATH | Or set `FIZZRA_PMD_HOME`. |
 | Java | spotbugs | `spotbugs` | download `spotbugs-*.tgz` from https://github.com/spotbugs/spotbugs/releases, add `bin/` to PATH | Or set `FIZZRA_SPOTBUGS_HOME`. Uses the launcher, not the jar. |
 | C# | roslynator | `roslynator` | `dotnet tool install --global Roslynator.DotNet.Cli` | Add `~/.dotnet/tools` to PATH. |

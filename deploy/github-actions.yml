@@ -58,9 +58,12 @@ jobs:
           sel=" ${{ inputs.with-analyzers || 'go' }} "
           want() { [[ "$sel" == *" $1 "* || "$sel" == *" all "* ]]; }
 
-          # JavaScript / TypeScript (oxlint, biome, ts/tsc)
+          # JavaScript / TypeScript (oxlint, biome)
+          # tsc is deliberately not installed here: the analyzer runs the
+          # project's own compiler from node_modules, so a global copy is never
+          # used.
           if want js; then
-            npm i -g oxlint @biomejs/biome typescript
+            npm i -g oxlint @biomejs/biome
           fi
           # Python (ruff). Also on PATH via pip's script dir.
           if want python; then
@@ -69,7 +72,7 @@ jobs:
           # Rust (clippy, rustfmt, cargo-audit)
           if want rust; then
             rustup component add clippy rustfmt
-            cargo install cargo-audit
+            cargo install cargo-audit --locked
           fi
           # Java (pmd, spotbugs). Both ship as zip bundles, not apt packages on
           # the runner image, so fetch the latest release asset from the

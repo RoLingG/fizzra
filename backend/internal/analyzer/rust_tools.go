@@ -38,6 +38,10 @@ func (a *ClippyAnalyzer) Category() string { return "lint" }
 // cargo 负责调用 clippy，真正产生诊断的是 clippy-driver
 func (a *ClippyAnalyzer) Requires() []string { return []string{"cargo"} }
 
+func (a *ClippyAnalyzer) InstallHint() string {
+	return "rustup component add clippy"
+}
+
 func (a *ClippyAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
 	return nil, nil
 }
@@ -429,6 +433,10 @@ func (a *RustfmtAnalyzer) Description() string {
 func (a *RustfmtAnalyzer) Category() string   { return "lint" }
 func (a *RustfmtAnalyzer) Requires() []string { return []string{"cargo"} }
 
+func (a *RustfmtAnalyzer) InstallHint() string {
+	return "rustup component add rustfmt"
+}
+
 func (a *RustfmtAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
 	return nil, nil
 }
@@ -593,6 +601,10 @@ func (a *CargoAuditAnalyzer) Description() string {
 
 func (a *CargoAuditAnalyzer) Category() string   { return "vulnerability" }
 func (a *CargoAuditAnalyzer) Requires() []string { return []string{"cargo-audit"} }
+
+func (a *CargoAuditAnalyzer) InstallHint() string {
+	return "cargo install cargo-audit --locked"
+}
 
 // Options 把该分析器的开关暴露给面板
 //

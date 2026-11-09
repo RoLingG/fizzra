@@ -35,6 +35,10 @@ func (a *GofmtAnalyzer) Requires() []string {
 	return []string{"gofmt"}
 }
 
+func (a *GofmtAnalyzer) InstallHint() string {
+	return "Ships with the Go toolchain: install Go and put it on PATH"
+}
+
 func (a *GofmtAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
 	return nil, nil
 }
@@ -103,6 +107,10 @@ func (a *GoVetAnalyzer) Description() string {
 
 func (a *GoVetAnalyzer) Category() string   { return "lint" }
 func (a *GoVetAnalyzer) Requires() []string { return []string{"go"} }
+
+func (a *GoVetAnalyzer) InstallHint() string {
+	return "Ships with the Go toolchain: install Go and put it on PATH"
+}
 
 // vetDiag 匹配 go vet 的 `file.go:12:34: message` 输出
 var vetDiag = regexp.MustCompile(`^(.+?\.go):(\d+):(?:(\d+):)?\s*(.*)$`)

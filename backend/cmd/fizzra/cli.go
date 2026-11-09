@@ -1180,62 +1180,42 @@ Shows every registered analyzer and whether its external tools are installed.`)
 		fmt.Printf("  %s\n      %s\n", a.Name, wrapText(a.Description, 74, "      "))
 	}
 
-	missing := missingTools(info)
-	installHints := collectInstallHints(info)
-	if len(missing) > 0 {
+	hasMissing := false
+	for _, a := range info.Analyzers {
+		if !a.Ready && len(a.MissingTools) > 0 {
+			hasMissing = true
+			break
+		}
+	}
+	if hasMissing {
 		fmt.Printf("\n  Install the missing tools to enable everything:\n")
-		for _, m := range missing {
+		// 按分析器遍历而不是按工具名：clippy 和 rustfmt 共用 cargo，按工具名去重
+		// 只会留下其中一条安装命令，另一个分析器就永远装不上。
+		// 只合并文字完全相同的提示，go 和 gofmt 属于这种情况
+		printed := map[string]bool{}
+		for _, a := range info.Analyzers {
+			if a.Ready || len(a.MissingTools) == 0 {
+				continue
+			}
 			// 优先用分析器声明的提示
 			//
 			// 光有名字不足以拼出命令，它对工具属于哪个生态只字未提，所以这个循环
 			// 过去会打印 `go install oxlint@latest`，一个立刻失败的畸形模块路径。
 			// 知道自己的工具怎么安装的分析器现在会说明，下面的回退只针对 Go 工具，
 			// 那是从名字推导命令唯一正确的情况
-			if hint := installHints[m]; hint != "" {
-				fmt.Printf("      %s\n", hint)
+			hint := a.InstallHint
+			if hint == "" {
+				hint = "go install " + installPath(toolName(a.MissingTools[0])) + "@latest"
+			}
+			if printed[hint] {
 				continue
 			}
-			fmt.Printf("      go install %s@latest\n", installPath(m))
+			printed[hint] = true
+			fmt.Printf("      %s\n", hint)
 		}
 	}
 	fmt.Println()
 	return 0
-}
-
-// missingTools 返回不可用的依赖名，已排序
-//
-// 工具名可能带一个括号标注，比如 "ruff (not probed)"，所以调用方按前缀而不是按
-// 原始字符串去查提示
-func missingTools(info service.SystemInfo) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, a := range info.Analyzers {
-		for _, m := range a.MissingTools {
-			if !seen[m] {
-				seen[m] = true
-				out = append(out, m)
-			}
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-// collectInstallHints 把每个不可用的工具名映射到其分析器声明的安装提示
-//
-// 按工具名而不是分析器名索引，因为列表打印的粒度就是工具名，两个分析器共用一个
-// 工具，不该把同一条指示产出两遍
-func collectInstallHints(info service.SystemInfo) map[string]string {
-	hints := map[string]string{}
-	for _, a := range info.Analyzers {
-		if a.Ready || a.InstallHint == "" {
-			continue
-		}
-		for _, tool := range a.MissingTools {
-			hints[toolName(tool)] = a.InstallHint
-		}
-	}
-	return hints
 }
 
 // toolName 去掉 Registry.Readiness 给缺失工具附加的标注
