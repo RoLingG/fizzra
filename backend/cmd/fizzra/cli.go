@@ -123,6 +123,9 @@ func parseCommonFlags(args []string) (cliOptions, error) {
 		case arg == "--help" || arg == "-h":
 			return opts, errHelp
 		case strings.HasPrefix(arg, "-"):
+			if _, ok := lookupFlagSpec(arg); ok {
+				return opts, fmt.Errorf("%s is a global flag and must come before the subcommand, e.g. fizzra %s", arg, arg)
+			}
 			return opts, fmt.Errorf("unknown flag %s", arg)
 		default:
 			if opts.Target != "" {

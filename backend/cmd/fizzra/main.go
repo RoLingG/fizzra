@@ -45,35 +45,34 @@ func run() int {
 		return 2
 	}
 
-	// 全局参数在子命令之前解析，`fizzra --config x serve` 与
-	// `fizzra serve --config x` 两种写法等价
-	globalArgs, command, rest := splitArgs(os.Args[1:])
+	// 全局标志只认命令之前的位置
+	flags, command, commandArgs := parseGlobalFlags(os.Args[1:])
 
-	cfgPath := ""
-	verbose := false
-	for i := 0; i < len(globalArgs); i++ {
-		switch globalArgs[i] {
-		case "--config", "-c":
-			if i+1 < len(globalArgs) {
-				cfgPath = globalArgs[i+1]
-				i++
-			}
-		case "--verbose", "-v":
-			verbose = true
-		case "--help", "-h":
-			printUsage()
-			return 0
-		}
+	if flags.help || command == "help" {
+		printUsage()
+		return 0
 	}
 
-	cfg, err := config.Load(cfgPath)
+	cmd, ok := lookupCommand(command)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
+		printUsage()
+		return 2
+	}
+
+	// 不走 bootstrap 触发的命令直接执行
+	if cmd.run == nil {
+		return cmd.standalone()
+	}
+
+	cfg, err := config.Load(flags.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
 		return 1
 	}
 
 	logLevel := "info"
-	if verbose {
+	if flags.verbose {
 		logLevel = "debug"
 	}
 	log := logger.New(logLevel, true)
@@ -92,57 +91,134 @@ func run() int {
 	}
 	defer app.Close()
 
-	switch command {
-	case "serve", "server", "web":
-		return cmdServe(app, cfg, rest)
-	case "scan":
-		return cmdScan(app, cfg, rest)
-	case "ci":
-		return cmdCI(app, cfg, rest)
-	case "report":
-		return cmdReport(app, cfg, rest)
-	case "rules":
-		return cmdRules(app, cfg, rest)
-	case "projects", "project":
-		return cmdProjects(app, cfg, rest)
-	case "analyzers":
-		return cmdAnalyzers(app, cfg, rest)
-	case "version":
-		fmt.Printf("fizzra %s\n", service.Version)
-		return 0
-	case "help":
-		printUsage()
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
-		printUsage()
-		return 2
-	}
+	return cmd.run(app, cfg, commandArgs)
 }
 
-// splitArgs 把开头的全局参数与子命令及其参数分开
-func splitArgs(args []string) (global []string, command string, rest []string) {
+// command 描述一条子命令
+type command struct {
+	// names 是它接受的写法，第一个是规范名
+	names []string
+	// run 需要已接好线的 App；为 nil 表示该命令不需要数据库
+	run func(app *App, cfg *config.Config, args []string) int
+	// standalone 在 run 为 nil 时执行
+	standalone func() int
+}
+
+var commands = []command{
+	{names: []string{"serve", "server", "web"}, run: cmdServe},
+	{names: []string{"scan"}, run: cmdScan},
+	{names: []string{"ci"}, run: cmdCI},
+	{names: []string{"report"}, run: cmdReport},
+	{names: []string{"rules"}, run: cmdRules},
+	{names: []string{"projects", "project"}, run: cmdProjects},
+	{names: []string{"analyzers"}, run: cmdAnalyzers},
+	{names: []string{"version"}, standalone: cmdVersion},
+}
+
+// cmdVersion 打印构建时通过 -ldflags -X 注入的版本号
+func cmdVersion() int {
+	fmt.Printf("fizzra %s\n", service.Version)
+	return 0
+}
+
+// lookupCommand 按任意别名查找子命令
+func lookupCommand(name string) (command, bool) {
+	for _, c := range commands {
+		if slices.Contains(c.names, name) {
+			return c, true
+		}
+	}
+	return command{}, false
+}
+
+// globalFlags 收集子命令之前的全局标志
+type globalFlags struct {
+	configPath string
+	verbose    bool
+	help       bool
+}
+
+// flagSpec 描述一个全局标志
+type flagSpec struct {
+	// names 是它接受的写法，第一个是规范名
+	names []string
+	// takesValue 表示它后面要跟一个值
+	takesValue bool
+	// valueName 是帮助里值的占位名，如 file、level
+	valueName string
+	// usage 是帮助里显示的一行说明
+	usage string
+	// set 把值写进 globalFlags
+	set func(f *globalFlags, value string)
+}
+
+var globalFlagSpecs = []flagSpec{
+	{
+		names:      []string{"-c", "--config"},
+		takesValue: true,
+		valueName:  "file",
+		usage:      "Configuration file (default: ./fizzra.yaml, ~/.fizzra/config.yaml)",
+		set:        func(f *globalFlags, v string) { f.configPath = v },
+	},
+	{
+		names: []string{"-v", "--verbose"},
+		usage: "Enable debug logging",
+		set:   func(f *globalFlags, _ string) { f.verbose = true },
+	},
+	{
+		names: []string{"-h", "--help"},
+		usage: "Show help",
+		set:   func(f *globalFlags, _ string) { f.help = true },
+	},
+}
+
+// lookupFlagSpec 按任意别名查找全局标志
+func lookupFlagSpec(name string) (flagSpec, bool) {
+	for _, s := range globalFlagSpecs {
+		if slices.Contains(s.names, name) {
+			return s, true
+		}
+	}
+	return flagSpec{}, false
+}
+
+// parseGlobalFlags 取开头的全局标志，返回它们、命令名和命令自己的参数
+//
+// 遇到第一个不以 - 开头、或不认识的参数就停，那之后的都归子命令处理
+func parseGlobalFlags(args []string) (globalFlags, string, []string) {
+	var flags globalFlags
 	i := 0
 	for i < len(args) {
-		a := args[i]
-		if a == "" || a[0] != '-' {
+		arg := args[i]
+		if arg == "" || arg[0] != '-' {
 			break
 		}
-		global = append(global, a)
-		// 需要取值的参数会消费下一个参数
-		if a == "--config" || a == "-c" {
-			if i+1 < len(args) {
-				global = append(global, args[i+1])
-				i++
-			}
+		spec, ok := lookupFlagSpec(arg)
+		if !ok {
+			// 不认识的标志留给子命令，`fizzra serve --port 9090` 里的 --port
+			// 属于 serve 而不是全局
+			break
 		}
+		value := ""
+		if spec.takesValue {
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "flag %s requires a value\n", arg)
+				os.Exit(2)
+			}
+			value = args[i+1]
+			i++
+		}
+		spec.set(&flags, value)
 		i++
 	}
+
+	var command string
+	var rest []string
 	if i < len(args) {
 		command = args[i]
 		rest = args[i+1:]
 	}
-	return global, command, rest
+	return flags, command, rest
 }
 
 // App 打包每条命令共用的、已接好线的依赖
@@ -514,10 +590,9 @@ Commands:
   help                  Show this message
 
 Global flags:
-  -c, --config <file>   Configuration file (default: ./fizzra.yaml, ~/.fizzra/config.yaml)
-  -v, --verbose         Enable debug logging
-  -h, --help            Show help
-
+`)
+	fmt.Fprint(os.Stderr, formatFlagSpecs(globalFlagSpecs))
+	fmt.Fprint(os.Stderr, `
 Common flags:
   --project <name|id>   Target a registered project instead of a local path
   --format <fmt>        Output format: text, json, html, sarif
@@ -533,6 +608,23 @@ Examples:
   fizzra report --project my-app --format html --output report.html
   fizzra rules export > fizzra-rules.yaml
 `)
+}
+
+// formatFlagSpecs 渲染全局标志，短名在前，带值的补上占位符
+func formatFlagSpecs(specs []flagSpec) string {
+	var b strings.Builder
+	for _, s := range specs {
+		names := strings.Join(s.names, ", ")
+		if s.takesValue {
+			name := s.valueName
+			if name == "" {
+				name = "value"
+			}
+			names += " <" + name + ">"
+		}
+		fmt.Fprintf(&b, "  %-20s %s\n", names, s.usage)
+	}
+	return b.String()
 }
 
 // validateConfigRule 检查来自配置的规则是否真能跑起来

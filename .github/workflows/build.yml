@@ -150,10 +150,25 @@ jobs:
           SERVER_PID=$!
           trap "kill $SERVER_PID" EXIT
 
+          # The server needs a moment to bind the port. Polling instead of a
+          # fixed sleep keeps the step fast when it comes up quickly and does
+          # not flake when the runner is slow.
+          ready=0
           for i in $(seq 1 20); do
-            if curl -sf http://127.0.0.1:18080/healthz > /dev/null; then break; fi
+            if curl -sf http://127.0.0.1:18080/healthz > /dev/null; then
+              echo "server ready after $((i * 500))ms"
+              ready=1
+              break
+            fi
             sleep 0.5
           done
+
+          # Without this the loop would fall through silently and the failure
+          # would surface as an opaque curl error on the next line.
+          if [ "$ready" -eq 0 ]; then
+            echo "server did not become ready within 10s" >&2
+            exit 1
+          fi
 
           curl -sf http://127.0.0.1:18080/healthz
           # The index must be the real dashboard, not the "not built" placeholder.
