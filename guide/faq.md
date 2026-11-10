@@ -102,3 +102,20 @@ WARN msg="configuration adjusted" field=quality.minScore detail="150.0 is outsid
 
 旧版键名（`coverage`、`criticalIssue`、`highSecurity`、`level`、单数 `pattern`）作为别名仍然可用。
 
+
+### Q：扫描陌生来源的仓库安全吗？
+
+不完全安全。部分分析器会构建、甚至执行被扫描项目的代码，最典型的是 `clippy`——`cargo clippy` 会完整构建 crate，`build.rs` 和 proc-macro 都在这个阶段运行。
+
+`golangci-lint` 和 `go-vet` 在类型检查时也可能触发构建。其余分析器（`ruff`、`oxlint`、`biome`、`tsc`、`pmd`、`spotbugs`、`phpstan`、`cargo-audit`、`rustfmt`）只读源码或已编译产物，不执行代码。
+
+扫描自己和团队的代码没有问题，这些工具本来就是开发者日常在用的。需要隔离时：
+
+- 在容器里跑 `fizzra`，不要在有凭据的宿主机上直接扫。
+- 或用 `--analyzers` 只启用不执行代码的分析器：
+
+```bash
+fizzra scan ./untrusted --analyzers custom,metrics,ruff,oxlint
+```
+
+`--offline` 只禁止联网，不阻止代码执行，两者不能互相替代。完整对照表见 README 的「安全须知」。

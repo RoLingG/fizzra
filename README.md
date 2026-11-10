@@ -36,6 +36,36 @@ go build -o fizzra.exe ./backend/cmd/fizzra         # 2. 编译，前端产物�
 
 ---
 
+## 安全须知
+
+Fizzra 调用各语言已有的 linter，而**部分 linter 会构建、甚至执行被扫描项目的代码**。对来源不可信的代码库，这一点必须先想清楚。
+
+| 分析器 | 是否执行项目代码 |
+|---|---|
+| `clippy` | **会**。`cargo clippy` 完整构建 crate，`build.rs` 与 proc-macro 在此阶段运行 |
+| `golangci-lint` | **可能**。部分 linter 会类型检查并编译包 |
+| `go-vet` | **可能**。分析依赖时可能触发构建 |
+| `cargo-audit` | 不会，只读 `Cargo.lock` |
+| `rustfmt` | 不会，只读源码 |
+| `ruff`、`oxlint`、`biome` | 不会，原生二进制只读文件 |
+| `tsc`、`vue-tsc` | 不会，只做类型分析 |
+| `pmd` | 不会，读源码 |
+| `spotbugs` | 不会，读已编译的 class |
+| `phpstan` | 不会，静态分析 |
+
+**扫描你信任的代码没有问题**，这些工具本来就是给开发者日常使用的。需要留意的是**扫描陌生来源的仓库**时：
+
+- 在容器或隔离环境里跑，不要在有凭据的机器上直接扫
+- 先用 `--analyzers` 只启用不执行代码的分析器：
+
+```bash
+fizzra scan ./untrusted --analyzers custom,metrics,ruff,oxlint
+```
+
+`--offline` 只禁止联网，**不阻止代码执行**，两者不能互相替代。
+
+---
+
 ## 环境要求与安装
 
 | 组件 | 版本 | 何时需要 |
@@ -382,7 +412,7 @@ fizzra ci . --format sarif --output fizzra.sarif --fail-on critical,error
 - [`deploy/github-actions.yml`](deploy/github-actions.yml) —— 扫描、上传 SARIF（问题会内联标注在 PR diff 上）、上传 HTML 报告、门禁失败时让 job 失败
 - [`deploy/gitlab-ci.yml`](deploy/gitlab-ci.yml) —— 同上，另有一个不阻断的 MR 咨询任务
 
-两个模板都会**先上传报告再让构建失败** —— SARIF 恰恰在门禁失败时最有用。
+两个模板都会**先上传报告再让构建失败**，SARIF 恰恰在门禁失败时最有用。
 
 ### 选择要安装的分析器工具
 
