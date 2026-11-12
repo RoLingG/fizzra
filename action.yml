@@ -14,9 +14,12 @@ inputs:
     required: false
     default: ''
   fail-on:
-    description: 'Comma separated severities that fail the gate: critical, error, warning.'
+    description: >-
+      Comma separated severities that fail the gate. Valid: critical, error,
+      warning. Empty keeps whatever fizzra.yaml and the dashboard already
+      configure, so this does not silently override a project's own thresholds.
     required: false
-    default: 'critical,error'
+    default: ''
   min-score:
     description: 'Override the minimum score. Empty uses the value from fizzra.yaml or the built-in default.'
     required: false
@@ -27,23 +30,26 @@ inputs:
       tool is not installed. Analyzers that crashed or timed out still fail the
       run. Defaults to false so a missing toolchain cannot silently pass.
     required: false
-    default: 'false'
+    default: false
   format:
-    description: 'Report format: sarif, json, html or text.'
+    description: >-
+      Primary report format: sarif, json or html. Text writes nothing to disk
+      and only echoes the summary into the job log.
     required: false
     default: 'sarif'
   extra-formats:
     description: >-
-      Additional formats to write after the scan, comma separated from sarif,
-      json, html. The main `format` still decides the gate and the SARIF
-      upload; these are generated from the same analysis and attached as a
-      single artifact, so producing all three costs one scan, not three.
+      Additional formats to attach as one artifact, comma separated from sarif,
+      json and html. Generated from the same analysis as `format`, so this
+      costs no second scan. Do not repeat the value already used by `format`:
+      that duplicates the file.
     required: false
     default: ''
   output:
     description: >-
-      Report path. Defaults to fizzra.sarif for sarif, fizzra.json for json
-      and fizzra-report.html for html. Ignored for text.
+      Path for the primary report. Defaults to fizzra.sarif for sarif,
+      fizzra.json for json and fizzra-report.html for html. Has no effect on
+      `format: text` and does not rename what `extra-formats` produces.
     required: false
     default: ''
   version:
@@ -60,7 +66,7 @@ inputs:
       ones on a plan with GitHub Advanced Security; elsewhere the step fails but
       is marked continue-on-error, so the scan itself still gates the build.
     required: false
-    default: 'true'
+    default: true
 
 outputs:
   score:
@@ -102,6 +108,7 @@ runs:
         # is correct everywhere, so only the host is taken from the context and
         # the repository path is spelled out.
         server="${GITHUB_SERVER_URL:-https://github.com}"
+        echo "probe: action_repository=[${{ github.action_repository }}] action_ref=[${{ github.action_ref }}]"
         if [ "$INPUT_VERSION" = latest ]; then
           url="$server/RoLingG/fizzra/releases/latest/download/$asset"
         else
@@ -124,7 +131,7 @@ runs:
         # the absolute path rather than relying on PATH.
         echo "$bindir" >> "$GITHUB_PATH"
         echo "::group::fizzra version"
-        "$cmd" version || true
+        "$cmd" version
         echo "::endgroup::"
 
     - name: Scan
@@ -159,12 +166,11 @@ runs:
         if [ -n "$INPUT_ANALYZERS" ]; then args+=(--analyzers "$INPUT_ANALYZERS"); fi
         if [ -n "$INPUT_FAIL_ON" ]; then args+=(--fail-on "$INPUT_FAIL_ON"); fi
         if [ -n "$INPUT_MIN_SCORE" ]; then args+=(--min-score "$INPUT_MIN_SCORE"); fi
-        if [ "$INPUT_ALLOW_SKIPPED" = true ]; then args+=(--allow-skipped); fi
-
-        # Only advertise a path when one was actually written
-        if [ -n "$out" ]; then
-          echo "report-path=$out" >> "$GITHUB_OUTPUT"
-        fi
+        # 布尔 input 传到 shell 时是字符串，大小写和形式不保证跨版本一致，
+        # 所以按 true/True/1 都认
+        case "$INPUT_ALLOW_SKIPPED" in
+          true|True|TRUE|1) args+=(--allow-skipped) ;;
+        esac
 
         # Capture the summary so the workflow log carries the score even when
         # the gate fails; the step's own exit code still decides the outcome.
@@ -174,16 +180,47 @@ runs:
         code=${PIPESTATUS[0]}
         set -e
 
-        score=$(sed -n 's/^ *Score *\([0-9.]*\)\/100.*/\1/p' "$RUNNER_TEMP/fizzra/scan.log" | head -1)
-        gate=$(sed -n 's/^ *Result *\([A-Za-z]*\).*/\1/p' "$RUNNER_TEMP/fizzra/scan.log" | head -1 | tr '[:upper:]' '[:lower:]')
-        # 项目名不一定是目录名，重名时会被追加哈希，后续步骤靠这个名字取报告
-        proj=$(sed -n 's/^project: //p' "$RUNNER_TEMP/fizzra/scan.log" | head -1)
-        echo "score=${score}" >> "$GITHUB_OUTPUT"
-        echo "gate=${gate}" >> "$GITHUB_OUTPUT"
-        echo "project=${proj}" >> "$GITHUB_OUTPUT"
+        # Only advertise a path when the file is really there. Reporting it
+        # unconditionally would hand downstream steps a path that 404s when
+        # the write failed for a permission or disk reason.
+        if [ -n "$out" ]; then
+          if [ -f "$out" ]; then
+            echo "report-path=$out" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::expected the report at $out but it was not written"
+          fi
+        fi
+
+        # Values come from the `fizzra-summary:` line, whose field names are a
+        # contract. Parsing the human-readable table instead would break the
+        # moment its spacing changes.
+        summary=$(grep '^fizzra-summary: ' "$RUNNER_TEMP/fizzra/scan.log" | head -1)
+        field() { echo "$summary" | sed -n "s/.*[ ]$1=\([^ ]*\).*/\1/p"; }
+
+        score=$(field score)
+        gate=$(field gate)
+        proj=$(field project)
+        reason=$(field reason)
+
+        if [ -n "$score" ]; then echo "score=$score" >> "$GITHUB_OUTPUT"; fi
+        if [ -n "$gate" ]; then echo "gate=$gate" >> "$GITHUB_OUTPUT"; fi
+        if [ -n "$proj" ]; then echo "project=$proj" >> "$GITHUB_OUTPUT"; fi
 
         if [ "$code" -ne 0 ]; then
-          echo "::error::Fizzra quality gate failed. Review the summary above and the report artefact."
+          case "$reason" in
+            analyzer-failed)
+              echo "::error::Fizzra could not complete: one or more analyzers crashed or timed out. See the log above."
+              ;;
+            nothing-checked)
+              echo "::error::Fizzra checked nothing: every analyzer was skipped. Install the missing tools or narrow --analyzers."
+              ;;
+            incomplete)
+              echo "::error::Fizzra quality gate failed on a partial scan."
+              ;;
+            *)
+              echo "::error::Fizzra quality gate failed. Review the summary above and the report artefact."
+              ;;
+          esac
         fi
         exit "$code"
 
@@ -196,6 +233,7 @@ runs:
       env:
         INPUT_EXTRA: ${{ inputs.extra-formats }}
         INPUT_PROJECT: ${{ steps.scan.outputs.project }}
+        INPUT_PRIMARY: ${{ inputs.format }}
       run: |
         set -euo pipefail
 
@@ -218,6 +256,13 @@ runs:
             sarif) dest="$RUNNER_TEMP/fizzra/reports/fizzra.sarif" ;;
             *) echo "::warning::unknown format '$fmt' in extra-formats, skipped"; continue ;;
           esac
+
+          # `format` already wrote this one to the workspace; repeating it just
+          # attaches a second copy of the same file
+          if [ "$fmt" = "$INPUT_PRIMARY" ]; then
+            echo "::warning::$fmt is the primary format already, skip it in extra-formats"
+            continue
+          fi
 
           echo "::group::report $fmt"
           if fizzra report --project "$proj" --format "$fmt" --output "$dest"; then

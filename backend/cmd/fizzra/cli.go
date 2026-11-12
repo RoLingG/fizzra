@@ -681,8 +681,11 @@ func cmdCI(app *App, cfg *config.Config, args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n\n%s\n", err, ciUsage)
 		return 2
 	}
-	if opts.Format == "text" {
-		opts.Format = "text"
+	// text 只有终端摘要，没有文件可写。静默忽略 --output 会让用户以为报告
+	// 生成了，所以这里直接拒绝
+	if opts.Format == "text" && opts.Output != "" {
+		fmt.Fprintf(os.Stderr, "error: --output has no effect with --format text; use json, html or sarif to write a file\n")
+		return 2
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -772,10 +775,36 @@ func cmdCI(app *App, cfg *config.Config, args []string) int {
 	fmt.Printf("  Result         %s\n", strings.ToUpper(gateResult.Status))
 	fmt.Printf("                 %s\n\n", gateResult.Reason)
 
+	// 机器可读的一行，供 CI 封装稳定地取值
+	//
+	// 上面的摘要是给人看的，排版随时可能调整，解析它等于把排版当成接口。
+	// 这一行的字段名和顺序是契约，改动等于破坏调用方
+	fmt.Printf("fizzra-summary: project=%s score=%.1f gate=%s reason=%s\n",
+		project.Name, analysis.Score, gateResult.Status, summaryReasonKind(analysis, gateResult))
+
 	if gateResult.Passed {
 		return 0
 	}
 	return 1
+}
+
+// summaryReasonKind 把失败原因归成一个稳定的短标记，供脚本判断该提示什么
+//
+// 三类要分开：代码没过门禁是作者该改代码，分析器缺失是环境没配好，扫描本身
+// 崩溃则是工具或项目坏了。把它们混成一个「失败」会让 CI 日志误导人
+func summaryReasonKind(analysis *model.Analysis, gate quality.GateResult) string {
+	switch {
+	case len(analysis.FailedAnalyzers) > 0:
+		return "analyzer-failed"
+	case analysis.NoAnalyzerRan:
+		return "nothing-checked"
+	case gate.Passed:
+		return "none"
+	case analysis.Incomplete:
+		return "incomplete"
+	default:
+		return "gate"
+	}
 }
 
 // incompleteReason 说明一次不完整的扫描为什么不通过
