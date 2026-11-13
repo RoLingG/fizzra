@@ -85,14 +85,12 @@ runs:
             ;;
         esac
 
-        # github.action_repository is not reliable inside a composite action --
-        # it reflects the caller's context, not this action's own repository,
-        # and resolves to the wrong path (or nothing) when the action is
-        # referenced by another repo. GITHUB_SERVER_URL is a plain env var and
-        # is correct everywhere, so only the host is taken from the context and
-        # the repository path is spelled out.
+        # github.action_repository and github.action_ref are empty inside a
+        # composite action: a step owned by the action cannot see where the
+        # action came from. Interpolating them gives "https://github.com//"
+        # and a 404, so the repository path is spelled out here and only the
+        # host is taken from the environment, which is also right on GHES.
         server="${GITHUB_SERVER_URL:-https://github.com}"
-        echo "probe: action_repository=[${{ github.action_repository }}] action_ref=[${{ github.action_ref }}]"
         if [ "$INPUT_VERSION" = latest ]; then
           url="$server/RoLingG/fizzra/releases/latest/download/$asset"
         else
