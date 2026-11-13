@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -319,8 +320,10 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		baseline = map[string]struct{}{}
 	}
 
+	// 非正的上限表示不限制
+	// Engine 可能被直接构造而不经过 config.Load，零值不当成「一条都不要」
 	maxIssues := e.Cfg.Scan.MaxIssues
-	truncated := len(merged) > maxIssues
+	truncated := maxIssues > 0 && len(merged) > maxIssues
 	if truncated {
 		merged = merged[:maxIssues]
 	}
@@ -410,7 +413,7 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 			gateResult.Status = model.GateFailed
 			gateResult.Reason = fmt.Sprintf(
 				"%d analyzer(s) failed, so this scan is incomplete and cannot be trusted to pass. %s",
-				len(failed), firstFailureDetail(failed, reasons))
+				len(failed), firstFailureDetail(failed))
 			analysis.GateStatus = gateResult.Status
 			analysis.GateReason = gateResult.Reason
 		}
@@ -431,12 +434,8 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 	for _, r := range results {
 		switch {
 		case r.Err != nil:
-			// 运行过然后报错，按它能否找问题归类
-			if findsProblems(r.Analyzer) {
-				inspected++
-			} else {
-				measured++
-			}
+			// 失败的不算检查过，它没有产生可信的结论
+			continue
 		case r.Skipped:
 			skipped = append(skipped, r.Analyzer)
 			if r.SkipReason != "" {
@@ -464,7 +463,10 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 	}
 
 	// 没有任何分析器去找过问题，评分就不可信，无论全部跳过还是只有度量分析器在跑
-	if inspected == 0 && len(skipped) > 0 {
+	//
+	// 失败的分析器由下面那段单独处理，它给出的是「哪个分析器坏了」而不是
+	// 「该装什么工具」，两者同时出现时只保留后者
+	if inspected == 0 && len(skipped) > 0 && len(failed) == 0 {
 		analysis.Incomplete = true
 		analysis.NoAnalyzerRan = true
 		log.Warn("no analyzer inspected the code", "skipped", strings.Join(skipped, ", "), "measuring", measured)
@@ -476,7 +478,7 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 			gateResult.Reason = fmt.Sprintf(
 				"no analyzer ran, so nothing was checked and the score means nothing. "+
 					"%d analyzer(s) skipped: %s",
-				len(skipped), firstFailureDetail(skipped, skipReasons))
+				len(skipped), firstFailureDetail(skipped))
 			analysis.GateStatus = gateResult.Status
 			analysis.GateReason = gateResult.Reason
 		} else if gateResult.Passed {
@@ -486,7 +488,7 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 			gateResult.Reason = fmt.Sprintf(
 				"no analyzer inspected the code, so this score reflects size and duplication only — "+
 					"no bug, security or style check ran. %d analyzer(s) skipped: %s",
-				len(skipped), firstFailureDetail(skipped, skipReasons))
+				len(skipped), firstFailureDetail(skipped))
 			analysis.GateStatus = gateResult.Status
 			analysis.GateReason = gateResult.Reason
 		}
@@ -520,6 +522,16 @@ func (e *Engine) runAnalyzers(actx *analyzer.Context, analyzers []analyzer.Analy
 	var done int
 	var mu sync.Mutex
 
+	// advance 记录一个分析器已经结束，跑完、跳过、取消都算
+	// 进度按已结束数推进，少算一个会让进度条到不了 100%
+	advance := func(name string) {
+		mu.Lock()
+		done++
+		percent := 10 + int(float64(done)/float64(len(analyzers))*65)
+		mu.Unlock()
+		e.setProgress(analysisID, projectID, percent, name)
+	}
+
 	for i, a := range analyzers {
 		wg.Add(1)
 		go func(idx int, an analyzer.Analyzer) {
@@ -533,6 +545,7 @@ func (e *Engine) runAnalyzers(actx *analyzer.Context, analyzers []analyzer.Analy
 					Analyzer: an.Name(),
 					Err:      actx.Context.Err(),
 				}
+				advance(an.Name())
 				return
 			}
 
@@ -567,11 +580,7 @@ func (e *Engine) runAnalyzers(actx *analyzer.Context, analyzers []analyzer.Analy
 
 			results[idx] = result
 
-			mu.Lock()
-			done++
-			percent := 10 + int(float64(done)/float64(len(analyzers))*65)
-			mu.Unlock()
-			e.setProgress(analysisID, projectID, percent, an.Name())
+			advance(an.Name())
 
 			actx.Log.Info("analyzer finished",
 				"analyzer", an.Name(),
@@ -777,7 +786,7 @@ func (e *Engine) toRecord(issue analyzer.Issue, analysis *model.Analysis, projec
 func (e *Engine) gateFor(projectID string) (quality.Gate, error) {
 	gate, err := e.Data.QualityGates().Get(projectID)
 	if err != nil {
-		if err == store.ErrNotFound {
+		if errors.Is(err, store.ErrNotFound) {
 			return quality.Gate{
 				MinScore:      e.Cfg.Quality.MinScore,
 				MaxCritical:   e.Cfg.Quality.MaxCritical,
@@ -889,10 +898,11 @@ func dedupeTools(results []analyzer.AnalysisResult) []string {
 	return out
 }
 
-// firstFailureDetail 只给出第一个失败的分析器
+// firstFailureDetail 只给出第一个阻塞项的名字
 //
-// 完整原因已在 analysis.FailureReasons 上，门禁原因里再复述只会重复一遍而没有新信息
-func firstFailureDetail(names, reasons []string) string {
+// 每个分析器的完整原因在 analysis.FailureReasons 和 SkipReasons 上，界面和命令行
+// 已经逐条列出，门禁理由里再复述只会重复一遍而没有新信息
+func firstFailureDetail(names []string) string {
 	if len(names) == 0 {
 		return ""
 	}
