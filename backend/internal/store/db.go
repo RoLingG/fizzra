@@ -38,7 +38,7 @@ func Open(cfg *config.Config, log *slog.Logger) (*DB, error) {
 
 	gdb, err := gorm.Open(sqlite.Open(sqliteDSN(dsn)), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(logLevel),
-
+		// 单条语句本身原子，多步写入自己包事务
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {
