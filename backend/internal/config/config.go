@@ -319,7 +319,11 @@ func normaliseAliases(raw []byte) ([]byte, error) {
 	if err := enc.Encode(doc.Content[0]); err != nil {
 		return nil, fmt.Errorf("re-encode: %w", err)
 	}
-	_ = enc.Close()
+	// Close 负责把尾部内容刷进 buf，它的错误也要检查，否则可能静默返回
+	// 一份被截断的 YAML
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("re-encode: %w", err)
+	}
 	return []byte(buf.String()), nil
 }
 

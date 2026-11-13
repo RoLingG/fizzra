@@ -414,20 +414,21 @@ func dedupeKey(i Issue) string {
 }
 
 // ruleFamilies 把各工具特有的规则标识映射到共享的家族，重叠的发现因此能合并
+//
+// 只列真正需要改名的。家族名本身不写进来——normalizeRuleFamily 找不到时原样
+// 返回，写一条 a: a 是多余的，还会让 gosec 的 G101 把 key 当成凭据
 var ruleFamilies = map[string]string{
 	// 未处理的错误
 	"errcheck":      "unchecked-error",
 	"g104":          "unchecked-error",
 	"ignored-error": "unchecked-error",
 	// 硬编码凭据
-	"g101":                 "hardcoded-credential",
-	"hardcoded-credential": "hardcoded-credential",
+	"g101": "hardcoded-credential",
 	// 弱加密
-	"g401":        "weak-crypto",
-	"g501":        "weak-crypto",
-	"g502":        "weak-crypto",
-	"g505":        "weak-crypto",
-	"weak-crypto": "weak-crypto",
+	"g401": "weak-crypto",
+	"g501": "weak-crypto",
+	"g502": "weak-crypto",
+	"g505": "weak-crypto",
 	// 注入
 	"g201":                   "sql-injection",
 	"g202":                   "sql-injection",
@@ -435,11 +436,9 @@ var ruleFamilies = map[string]string{
 	"g204":                   "command-injection",
 	"exec-command-injection": "command-injection",
 	// 路径处理
-	"g304":           "path-traversal",
-	"path-traversal": "path-traversal",
+	"g304": "path-traversal",
 	// TLS
-	"g402":         "insecure-tls",
-	"insecure-tls": "insecure-tls",
+	"g402": "insecure-tls",
 	// 格式
 	"gofmt": "formatting",
 }

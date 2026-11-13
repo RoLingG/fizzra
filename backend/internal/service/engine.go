@@ -656,7 +656,7 @@ func (e *Engine) prepareSources(ctx context.Context, project *model.Project, log
 	}
 
 	dest := filepath.Join(e.Cfg.Workspace.Root, project.ID)
-	if err := os.MkdirAll(e.Cfg.Workspace.Root, 0o755); err != nil {
+	if err := os.MkdirAll(e.Cfg.Workspace.Root, 0o750); err != nil {
 		return "", fmt.Errorf("create workspace: %w", err)
 	}
 

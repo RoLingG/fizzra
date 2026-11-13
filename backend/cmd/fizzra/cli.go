@@ -1062,7 +1062,7 @@ func outputWriter(opts cliOptions) (interface{ Write([]byte) (int, error) }, fun
 		return os.Stdout, func() error { return nil }, nil
 	}
 	if dir := filepath.Dir(opts.Output); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, nil, fmt.Errorf("create output directory: %w", err)
 		}
 	}
