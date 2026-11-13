@@ -36,14 +36,48 @@ triggers.
 Pin the action to a release tag rather than to a branch, so an upstream change
 cannot alter your pipeline without you deciding to take it.
 
-**Fizzra does not install language toolchains.** Use the official setup actions
-(`actions/setup-go`, `actions/setup-python`, `actions/setup-node`) as you
-already do, then list the analyzers you want. This keeps tool versions under
-your control and avoids an action that silently pins a compiler for you.
+### Install the toolchains first
+
+**Fizzra does not install anything.** It looks for each analyzer's tool on
+PATH and skips the ones it cannot find. Two separate things have to be in
+place before the scan:
+
+1. The **language runtime**, from the official setup action — Go, Python,
+   Node, the JDK and so on.
+2. The **linter itself**, which the setup action does not provide. Installing
+   Python does not install ruff.
+
+Missing either one produces a `skipped analyzer` line rather than a failure,
+so a scan with no setup still passes — it just checked less.
+
+| Language | Setup step | Then install the linter |
+| --- | --- | --- |
+| Go | `actions/setup-go@v6` | `go install` the four tools from the matrix below |
+| Python | `actions/setup-python@v6` | `pip install ruff` |
+| JS / TS | `actions/setup-node@v6` + `npm ci` | `npm i -g oxlint @biomejs/biome`; `tsc` comes from the project |
+| Rust | `dtolnay/rust-toolchain@stable` or rustup | `rustup component add clippy rustfmt`, `cargo install cargo-audit --locked` |
+| Java | `actions/setup-java@v6` | download PMD and SpotBugs releases |
+| C# | `actions/setup-dotnet@v4` | `dotnet tool install --global Roslynator.DotNet.Cli` |
+| C / C++ | — | `sudo apt-get install cppcheck clang-tidy` |
+| PHP | `shivammathur/setup-php@v2` | download `phpstan.phar` |
+
+A repository with several languages combines the rows it needs. The
+[language matrix](#language-matrix) below has the exact commands, versions and
+environment variables.
 
 The Go toolchain version must satisfy the `go` directive in your `go.mod`.
 Fizzra runs `go vet` against your module, and that command refuses to run when
 the installed toolchain is older than the module declares.
+
+To check what a runner actually has, run `fizzra analyzers` in a step placed
+**after** this action — the action puts the binary on PATH for the rest of the
+job. It lists every analyzer as `ready` or `missing`, with the install command
+for the missing ones:
+
+```yaml
+- uses: RoLingG/fizzra@v0.1.7
+- run: fizzra analyzers
+```
 
 ### What a skipped analyzer does
 
