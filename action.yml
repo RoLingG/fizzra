@@ -31,27 +31,13 @@ inputs:
       run. Defaults to false so a missing toolchain cannot silently pass.
     required: false
     default: false
-  format:
+  reports:
     description: >-
-      Primary report format: sarif, json or html. Text writes nothing to disk
-      and only echoes the summary into the job log.
+      Comma separated report formats to produce: sarif, json, html. Every one
+      of them is attached to a single artifact, generated from the same scan.
+      Empty writes no file and only prints the summary to the job log.
     required: false
     default: 'sarif'
-  extra-formats:
-    description: >-
-      Additional formats to attach as one artifact, comma separated from sarif,
-      json and html. Generated from the same analysis as `format`, so this
-      costs no second scan. Do not repeat the value already used by `format`:
-      that duplicates the file.
-    required: false
-    default: ''
-  output:
-    description: >-
-      Path for the primary report. Defaults to fizzra.sarif for sarif,
-      fizzra.json for json and fizzra-report.html for html. Has no effect on
-      `format: text` and does not rename what `extra-formats` produces.
-    required: false
-    default: ''
   version:
     description: >-
       Fizzra release to download. Defaults to latest. Pin a tag in CI so an
@@ -61,10 +47,11 @@ inputs:
   upload-sarif:
     description: >-
       Upload the SARIF report with codeql-action/upload-sarif so findings appear
-      as inline annotations. Requires the caller to grant security-events: write.
-      GitHub only accepts these uploads for public repositories and for private
-      ones on a plan with GitHub Advanced Security; elsewhere the step fails but
-      is marked continue-on-error, so the scan itself still gates the build.
+      as inline annotations. Requires sarif to be listed in `reports` and the
+      caller to grant security-events: write. GitHub only accepts these uploads
+      for public repositories and for private ones on a plan with GitHub
+      Advanced Security; elsewhere the step fails but is marked
+      continue-on-error, so the scan itself still gates the build.
     required: false
     default: true
 
@@ -75,9 +62,6 @@ outputs:
   gate:
     description: 'passed or failed.'
     value: ${{ steps.scan.outputs.gate }}
-  report-path:
-    description: 'Where the report was written.'
-    value: ${{ steps.scan.outputs.report-path }}
   project:
     description: 'The name the scanned directory was registered under.'
     value: ${{ steps.scan.outputs.project }}
@@ -143,23 +127,13 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_MIN_SCORE: ${{ inputs.min-score }}
         INPUT_ALLOW_SKIPPED: ${{ inputs.allow-skipped }}
-        INPUT_FORMAT: ${{ inputs.format }}
-        INPUT_OUTPUT: ${{ inputs.output }}
       run: |
         set -euo pipefail
 
-        args=(ci "$INPUT_PATH" --format "$INPUT_FORMAT" --print-project)
-
-        case "$INPUT_FORMAT" in
-          sarif) default_out=fizzra.sarif ;;
-          json)  default_out=fizzra.json ;;
-          html)  default_out=fizzra-report.html ;;
-          text)  default_out= ;;
-        esac
-        out="${INPUT_OUTPUT:-$default_out}"
-        if [ -n "$out" ]; then
-          args+=(--output "$out")
-        fi
+        # Reports are written by the next step from the stored analysis, so this
+        # one only needs the gate outcome. text keeps the CLI from opening a file
+        # it would then have to clean up.
+        args=(ci "$INPUT_PATH" --format text --print-project)
 
         # `if` rather than `[ ... ] && cmd`: under `set -e` a false test makes
         # the whole line return 1 and aborts the step.
@@ -179,17 +153,6 @@ runs:
         fizzra "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/fizzra/scan.log"
         code=${PIPESTATUS[0]}
         set -e
-
-        # Only advertise a path when the file is really there. Reporting it
-        # unconditionally would hand downstream steps a path that 404s when
-        # the write failed for a permission or disk reason.
-        if [ -n "$out" ]; then
-          if [ -f "$out" ]; then
-            echo "report-path=$out" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::expected the report at $out but it was not written"
-          fi
-        fi
 
         # Values come from the `fizzra-summary:` line, whose field names are a
         # contract. Parsing the human-readable table instead would break the
@@ -224,45 +187,39 @@ runs:
         fi
         exit "$code"
 
-    # Runs even when the gate failed, so a red build still yields the same
-    # reports a green one would. `report --project` reuses the analysis the step
-    # above just wrote instead of scanning again.
-    - name: Write extra report formats
-      if: always() && inputs.extra-formats != ''
+    # Writes every requested format into one directory so a single artifact
+    # carries all of them. Runs even when the gate failed, since a red build is
+    # exactly when the reports matter. `report --project` reuses the analysis
+    # the step above just wrote instead of scanning again.
+    - name: Collect reports
+      if: always() && inputs.reports != ''
       shell: bash
       env:
-        INPUT_EXTRA: ${{ inputs.extra-formats }}
+        INPUT_REPORTS: ${{ inputs.reports }}
         INPUT_PROJECT: ${{ steps.scan.outputs.project }}
-        INPUT_PRIMARY: ${{ inputs.format }}
       run: |
         set -euo pipefail
 
-        mkdir -p "$RUNNER_TEMP/fizzra/reports"
+        outdir="$RUNNER_TEMP/fizzra/reports"
+        mkdir -p "$outdir"
 
         # 用扫描时实际注册的名字，而不是目录名：目录同名时注册名会被追加哈希，
         # 用目录名取报告会拿到另一个项目
         proj="$INPUT_PROJECT"
         if [ -z "$proj" ]; then
-          echo "::warning::the scan did not report a project name, skipping extra formats"
+          echo "::warning::the scan did not report a project name, no report written"
           exit 0
         fi
 
         # A failure here must not mask the gate result, so each report is best
         # effort and the step never turns a red gate green.
-        for fmt in $(echo "$INPUT_EXTRA" | tr ',' ' '); do
+        for fmt in $(echo "$INPUT_REPORTS" | tr ',' ' '); do
           case "$fmt" in
-            json) dest="$RUNNER_TEMP/fizzra/reports/fizzra.json" ;;
-            html) dest="$RUNNER_TEMP/fizzra/reports/fizzra-report.html" ;;
-            sarif) dest="$RUNNER_TEMP/fizzra/reports/fizzra.sarif" ;;
-            *) echo "::warning::unknown format '$fmt' in extra-formats, skipped"; continue ;;
+            sarif) dest="$outdir/fizzra.sarif" ;;
+            json)  dest="$outdir/fizzra.json" ;;
+            html)  dest="$outdir/fizzra-report.html" ;;
+            *) echo "::warning::unknown format '$fmt' in reports, skipped"; continue ;;
           esac
-
-          # `format` already wrote this one to the workspace; repeating it just
-          # attaches a second copy of the same file
-          if [ "$fmt" = "$INPUT_PRIMARY" ]; then
-            echo "::warning::$fmt is the primary format already, skip it in extra-formats"
-            continue
-          fi
 
           echo "::group::report $fmt"
           if fizzra report --project "$proj" --format "$fmt" --output "$dest"; then
@@ -273,8 +230,9 @@ runs:
           echo "::endgroup::"
         done
 
+    # One artifact holds every report the scan produced.
     - name: Upload reports
-      if: always() && inputs.extra-formats != ''
+      if: always() && inputs.reports != ''
       uses: actions/upload-artifact@v6
       with:
         name: fizzra-reports
@@ -284,19 +242,14 @@ runs:
 
     # Uploaded before failing so the annotations are available precisely when
     # the gate is red. `if: always()` is what makes that ordering work.
+    # Separate from the artifact above: this one feeds GitHub's code scanning,
+    # it does not produce a downloadable file. Points at the copy Collect
+    # reports just wrote, not the workspace: the scan itself no longer leaves a
+    # SARIF file behind.
     - name: Upload SARIF
-      if: always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif'
+      if: always() && inputs.upload-sarif && contains(inputs.reports, 'sarif')
       uses: github/codeql-action/upload-sarif@v4
       with:
-        sarif_file: ${{ inputs.output != '' && inputs.output || 'fizzra.sarif' }}
+        sarif_file: ${{ runner.temp }}/fizzra/reports/fizzra.sarif
         category: fizzra
-      continue-on-error: true
-
-    - name: Upload HTML report
-      if: always() && inputs.format == 'html'
-      uses: actions/upload-artifact@v6
-      with:
-        name: fizzra-report
-        path: ${{ inputs.output != '' && inputs.output || 'fizzra-report.html' }}
-        retention-days: 14
       continue-on-error: true
