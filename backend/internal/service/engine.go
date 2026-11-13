@@ -320,8 +320,7 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		baseline = map[string]struct{}{}
 	}
 
-	// 非正的上限表示不限制
-	// Engine 可能被直接构造而不经过 config.Load，零值不当成「一条都不要」
+	// 非正的上限表示不限制，Engine 也可能被直接构造而不经过 config.Load
 	maxIssues := e.Cfg.Scan.MaxIssues
 	truncated := maxIssues > 0 && len(merged) > maxIssues
 	if truncated {
@@ -407,7 +406,6 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		analysis.FailureReasons = reasons
 		log.Warn("some analyzers failed", "failures", strings.Join(logParts, "; "))
 
-		// 把「有 3 个严重 bug」改写成「扫描不完整」会丢掉更有用的那条消息
 		if gateResult.Passed {
 			gateResult.Passed = false
 			gateResult.Status = model.GateFailed
@@ -419,14 +417,10 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		}
 	}
 
-	// 一个都不找问题的分析器跑过，不等于检查过代码。零发现如果没有分析器去找过，
-	// 就是缺乏证据，不能当成质量合格
+	// 把每个分析器的结局归成三类：失败、跳过、完成
 	//
-	// 指标分析器度量规模与重复度，找不出缺陷，又不需要外部工具，所以总会运行。
-	// 把它算作覆盖，会让一个 linter 全部跳过的项目凭一行干净数字通过
-	//
-	// 失败与跳过分开处理，失败说明分析器坏了，跳过说明它正确地退出了，两者都让
-	// 评分不可信，但需要不同的说明
+	// 失败说明分析器坏了，跳过说明它正确地退出了，完成才可能算作检查过代码。
+	// 指标分析器度量规模与重复度，找不出缺陷，所以单独归到 measured
 	var skipped []string
 	var skipReasons []string
 	inspected, measured := 0, 0
@@ -450,22 +444,20 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 			}
 		}
 	}
-	// 成功跑完的才计入，好让 CI 的 --allow-skipped 能区分「没装工具但度量跑了」
-	// 和「一个都没跑」——后者放行等于什么都没验过就报通过
+	// 只数成功跑完的，CI 的 --allow-skipped 靠它区分「度量跑了、检查跳过了」
+	// 和「一个都没跑」
 	analysis.AnalyzersCompleted = completed
 
-	// 每次扫描都记录跳过，而不只是下面全部跳过的情况。否则一次悄悄漏掉半数检查的
-	// 扫描，与一次跑全了却没发现问题的扫描无法区分
+	// 每次扫描都记录跳过，否则漏掉半数检查的扫描与跑全了却没问题的无法区分
 	if len(skipped) > 0 {
 		analysis.SkippedAnalyzers = skipped
 		analysis.SkipReasons = skipReasons
 		analysis.SkippedTools = dedupeTools(results)
 	}
 
-	// 没有任何分析器去找过问题，评分就不可信，无论全部跳过还是只有度量分析器在跑
+	// 没有任何分析器去找过问题，评分就不可信
 	//
-	// 失败的分析器由下面那段单独处理，它给出的是「哪个分析器坏了」而不是
-	// 「该装什么工具」，两者同时出现时只保留后者
+	// 有分析器失败时走上面那段，那里说的是「哪个分析器坏了」，读者要做的准备不同
 	if inspected == 0 && len(skipped) > 0 && len(failed) == 0 {
 		analysis.Incomplete = true
 		analysis.NoAnalyzerRan = true
@@ -523,7 +515,7 @@ func (e *Engine) runAnalyzers(actx *analyzer.Context, analyzers []analyzer.Analy
 	var mu sync.Mutex
 
 	// advance 记录一个分析器已经结束，跑完、跳过、取消都算
-	// 进度按已结束数推进，少算一个会让进度条到不了 100%
+	// 进度按已结束数推进
 	advance := func(name string) {
 		mu.Lock()
 		done++

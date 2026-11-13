@@ -207,13 +207,16 @@ func (r *analysisRepo) Stats(projectID string) (AnalysisStats, error) {
 type issueRepo struct{ db *DB }
 
 // BatchCreate 分块插入问题，SQLite 的变量上限会让一条带数千行的巨型 INSERT
-// 失败，所以做了分页
+// 失败，所以做了分页。整批落在同一个事务里，中途失败不会留下部分记录
 func (r *issueRepo) BatchCreate(issues []model.Issue) error {
 	if len(issues) == 0 {
 		return nil
 	}
 	const chunk = 200
-	return translateError(r.db.CreateInBatches(issues, chunk).Error)
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		return tx.CreateInBatches(issues, chunk).Error
+	})
+	return translateError(err)
 }
 
 func (r *issueRepo) Get(id string) (*model.Issue, error) {
