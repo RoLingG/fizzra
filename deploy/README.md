@@ -73,14 +73,12 @@ relax the second: a crash stays a failure no matter what.
 | --- | --- | --- |
 | `path` | `.` | Directory to scan, relative to the workspace |
 | `analyzers` | (all applicable) | Comma separated analyzer names, e.g. `custom,metrics,wails` |
-| `fail-on` | `critical,error` | Severities that fail the gate: `critical`, `error`, `warning` |
+| `fail-on` | (from config) | Severities that fail the gate: `critical`, `error`, `warning`. Empty keeps the project's own thresholds |
 | `min-score` | from config (70) | Override the minimum score. Below it the gate fails |
 | `allow-skipped` | `false` | Pass when every analyzer was skipped for missing tools |
-| `format` | `sarif` | Primary format: `sarif`, `json`, `html` or `text` |
-| `extra-formats` | (none) | Extra formats from the same scan: `json`, `html`, `sarif` |
-| `output` | by format | Report path. Defaults to `fizzra.sarif`, `fizzra.json` or `fizzra-report.html` |
+| `reports` | `sarif` | Comma separated formats to produce: `sarif`, `json`, `html` |
 | `version` | `latest` | Release to download — pin a tag in CI |
-| `upload-sarif` | `true` | Upload with codeql-action. Needs `security-events: write` |
+| `upload-sarif` | `true` | Upload with codeql-action. Needs `sarif` in `reports` and `security-events: write` |
 
 #### `fail-on` and `min-score`
 
@@ -98,22 +96,27 @@ Two independent ways to fail a build. `fail-on` counts findings by severity;
 Warnings never fail on their own. Raise `fail-on` to include them only if you
 want style-level findings to block merges; the score already reflects them.
 
-#### `format` versus `extra-formats`
+#### `reports`
 
-`format` is the report that decides the gate's result and, when it is `sarif`,
-the one uploaded to code scanning. `extra-formats` writes additional files from
-the **same analysis** — no second scan — and attaches them as one artifact.
+One list of formats. Every file it names is written from the **same analysis**
+— no second scan — and attached to a single artifact called `fizzra-reports`.
 
 ```yaml
-# Keep SARIF for code scanning, and also attach JSON and HTML for humans.
+# SARIF for code scanning plus JSON and HTML for humans.
 - uses: RoLingG/fizzra@v0.1.3
   with:
-    extra-formats: json,html
+    reports: sarif,json,html
 ```
 
-The artifact is named `fizzra-reports` and contains `fizzra.json` and
-`fizzra-report.html`. It is uploaded even when the gate fails, so a red build
-still carries the evidence.
+| Value | File in the artifact |
+| --- | --- |
+| `sarif` | `fizzra.sarif` |
+| `json` | `fizzra.json` |
+| `html` | `fizzra-report.html` |
+
+The artifact is uploaded even when the gate fails, so a red build still carries
+the evidence. An empty `reports` writes nothing and only prints the summary
+into the job log.
 
 To download the artifact from another job:
 
@@ -122,6 +125,10 @@ To download the artifact from another job:
   with:
     name: fizzra-reports
 ```
+
+`upload-sarif` is separate from `reports`: it decides whether the SARIF file is
+pushed to code scanning, not whether it is produced. Asking for `sarif` in
+`reports` while `upload-sarif: false` gives you the file without the annotations.
 
 #### `analyzers`
 
@@ -151,7 +158,7 @@ where each package has its own workflow:
 | --- | --- |
 | `score` | Overall score, 0–100 |
 | `gate` | `passed` or `failed` |
-| `report-path` | Where the primary report was written |
+| `project` | The name the scanned directory was registered under |
 
 Consume them in later steps:
 
