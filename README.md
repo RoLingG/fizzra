@@ -111,10 +111,19 @@ fizzra --config my.yaml serve   # 指定配置文件
 
 ```
 ~/.fizzra/
-└── fizzra.db        # SQLite：项目、分析记录、问题、规则
+├── fizzra.db        # SQLite：项目、分析记录、问题、规则
+└── workspace/       # 通过仓库地址注册的项目，克隆到这里
 ```
 
-删掉这个目录即完全重置。
+**本地路径注册的项目原地扫描，不复制文件。** 只有填了仓库地址的项目才需要克隆，目录名是项目 ID（`prj_xxxxxxxx`）。
+
+克隆是 `--depth 1` 的浅克隆，只取最新一次提交。再次扫描用的是 `git fetch` 加 `git checkout`，不会重新克隆；fetch 失败时会在日志里警告并继续用已有代码扫描，所以网络不通时看到的可能是上次的代码。
+
+工作区的位置可以用配置项 `workspace.root` 或环境变量 `FIZZRA_WORKSPACE` 改到别处。
+
+> **删除项目不会清理 `workspace/` 下的代码。** 需要释放磁盘空间时手动删掉对应目录，或者整个删掉 `workspace/`——下次扫描会重新克隆。
+
+删掉 `~/.fizzra/` 即完全重置。
 
 ---
 
