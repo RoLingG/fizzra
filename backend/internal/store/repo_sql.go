@@ -166,38 +166,42 @@ func (r *analysisRepo) DeleteByProject(projectID string) error {
 	return translateError(r.db.Delete(&model.Analysis{}, "project_id = ?", projectID).Error)
 }
 
+// Stats 汇总成功的分析记录
 func (r *analysisRepo) Stats(projectID string) (AnalysisStats, error) {
-	var rows []model.Analysis
-	q := r.db.Where("status = ?", model.StatusSuccess)
+	type row struct {
+		Runs       int
+		AvgScore   float64
+		BestScore  float64
+		WorstScore float64
+		PassedRuns int
+		FailedRuns int
+	}
+	var agg row
+
+	q := r.db.Model(&model.Analysis{}).
+		Select(`count(*) AS runs,
+			coalesce(avg(score), 0) AS avg_score,
+			coalesce(max(score), 0) AS best_score,
+			coalesce(min(score), 0) AS worst_score,
+			coalesce(sum(CASE WHEN gate_status = ? THEN 1 ELSE 0 END), 0) AS passed_runs,
+			coalesce(sum(CASE WHEN gate_status = ? THEN 1 ELSE 0 END), 0) AS failed_runs`,
+			model.GatePassed, model.GateFailed).
+		Where("status = ?", model.StatusSuccess)
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
-	if err := q.Find(&rows).Error; err != nil {
+	if err := q.Scan(&agg).Error; err != nil {
 		return AnalysisStats{}, translateError(err)
 	}
 
-	stats := AnalysisStats{Runs: len(rows)}
-	for _, a := range rows {
-		if stats.Runs > 0 {
-			if stats.BestScore == 0 || a.Score > stats.BestScore {
-				stats.BestScore = a.Score
-			}
-			if stats.WorstScore == 0 || a.Score < stats.WorstScore {
-				stats.WorstScore = a.Score
-			}
-		}
-		stats.AvgScore += a.Score
-		switch a.GateStatus {
-		case model.GatePassed:
-			stats.PassedRuns++
-		case model.GateFailed:
-			stats.FailedRuns++
-		}
-	}
-	if stats.Runs > 0 {
-		stats.AvgScore /= float64(stats.Runs)
-	}
-	return stats, nil
+	return AnalysisStats{
+		Runs:       agg.Runs,
+		AvgScore:   agg.AvgScore,
+		BestScore:  agg.BestScore,
+		WorstScore: agg.WorstScore,
+		PassedRuns: agg.PassedRuns,
+		FailedRuns: agg.FailedRuns,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------

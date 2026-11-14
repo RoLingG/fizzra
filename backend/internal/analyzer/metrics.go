@@ -10,6 +10,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -703,22 +704,27 @@ func hashLines(lines []string) string {
 //	JS/TS   lcov.info / coverage-final.json（Istanbul）
 func (a *MetricsAnalyzer) detectCoverage(actx *Context) (float64, *Issue) {
 	for _, candidate := range coverageCandidates(actx.ProjectLanguage) {
-		if !actx.Files.Exists(candidate) {
-			continue
-		}
-		fi := findInSet(actx.Files, candidate)
-		if fi == nil {
-			continue
-		}
-		raw, err := actx.Files.Read(*fi, 16<<20)
-		if err != nil {
-			continue
-		}
-		if percent, ok := parseCoverageReport(string(raw)); ok {
+		if percent, ok := readCoverage(actx.ProjectPath, candidate); ok {
 			return percent, nil
 		}
 	}
 	return 0, nil
+}
+
+// readCoverage 读取并解析一个候选路径，读不到或解析不了时返回 false
+//
+// 直接读文件系统而不是走 FileSet，覆盖率报告是生成物，通常列在 .gitignore 里，而 FileSet 遵守它
+func readCoverage(projectPath, candidate string) (float64, bool) {
+	path := filepath.Join(projectPath, filepath.FromSlash(candidate))
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return 0, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	return parseCoverageReport(string(raw))
 }
 
 // coverageCandidates 列出要查找的报告路径，按优先级排列
@@ -748,22 +754,23 @@ func coverageCandidates(language string) []string {
 	return append(out, shared...)
 }
 
-// parseCoverageReport 嗅探格式并解析
+// coverageParsers 按顺序尝试，先匹配的先命中
+var coverageParsers = []func(src string) (float64, bool){
+	parseGoCoverageProfile,
+	parseLCOV,
+	parseCobertura,
+	parseIstanbulJSON,
+}
+
+// parseCoverageReport 依次尝试已知格式
 //
-// 靠嗅探而不是信任扩展名，因为同一个文件名在不同生态里对应不同格式，项目也可能
-// 改过输出名。每个解析器都足够严格，猜错会失败而不是返回一个看似合理的错数字
+// 按内容判断而不是扩展名，同一个名字在不同生态里可能是不同格式，也有的项目改过输出名
 func parseCoverageReport(src string) (float64, bool) {
-	if percent, ok := parseGoCoverageProfile(src); ok {
-		return percent, true
-	}
-	if percent, ok := parseLCOV(src); ok {
-		return percent, true
-	}
-	if percent, ok := parseCobertura(strings.TrimSpace(src)); ok {
-		return percent, true
-	}
-	if percent, ok := parseIstanbulJSON(src); ok {
-		return percent, true
+	src = strings.TrimSpace(src)
+	for _, parse := range coverageParsers {
+		if percent, ok := parse(src); ok {
+			return percent, true
+		}
 	}
 	return 0, false
 }
@@ -890,17 +897,6 @@ func parseGoCoverageProfile(src string) (float64, bool) {
 		return 0, false
 	}
 	return float64(coveredStmt) / float64(totalStmt) * 100, true
-}
-
-func findInSet(files *FileSet, rel string) *FileInfo {
-	rel = filepath.ToSlash(rel)
-	for _, fi := range files.All() {
-		if fi.Rel == rel {
-			f := fi
-			return &f
-		}
-	}
-	return nil
 }
 
 // metricsSyntax 持有行分类器需要的词法信息

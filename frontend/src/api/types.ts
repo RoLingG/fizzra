@@ -49,8 +49,6 @@ export interface AnalysisStats {
   worstScore: number
   passedRuns: number
   failedRuns: number
-  lastScore: number
-  lastRunAt: string
 }
 
 export interface ProjectSummary extends Project {

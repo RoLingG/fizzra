@@ -109,8 +109,6 @@ type AnalysisStats struct {
 	WorstScore float64 `json:"worstScore"`
 	PassedRuns int     `json:"passedRuns"`
 	FailedRuns int     `json:"failedRuns"`
-	LastScore  float64 `json:"lastScore"`
-	LastRunAt  string  `json:"lastRunAt"`
 }
 
 // ErrNotFound 由仓储在记录不存在时返回
