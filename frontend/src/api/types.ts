@@ -53,6 +53,7 @@ export interface AnalysisStats {
 
 export interface ProjectSummary extends Project {
   latest?: Analysis
+  inFlight?: Analysis
   stats: AnalysisStats
 }
 

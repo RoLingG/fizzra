@@ -165,6 +165,17 @@ func (r *analysisRepo) LatestForProject(projectID string) (*model.Analysis, erro
 	return &a, nil
 }
 
+func (r *analysisRepo) InFlightForProject(projectID string) (*model.Analysis, error) {
+	var a model.Analysis
+	err := r.db.Where("project_id = ? AND status IN ?", projectID,
+		[]string{model.StatusPending, model.StatusRunning}).
+		Order("created_at DESC").First(&a).Error
+	if err != nil {
+		return nil, translateError(err)
+	}
+	return &a, nil
+}
+
 func (r *analysisRepo) Trend(projectID string, limit int) ([]model.Analysis, error) {
 	var out []model.Analysis
 	err := r.db.Where("project_id = ? AND status = ?", projectID, model.StatusSuccess).

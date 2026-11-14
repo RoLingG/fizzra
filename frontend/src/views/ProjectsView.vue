@@ -216,9 +216,9 @@ async function remove(project: ProjectSummary) {
   }
 }
 
-// 最新一次分析还没结束时，列表在这一列显示扫描中而不是时间
+// 正在进行中的分析，列表在这一列显示扫描中而不是时间
 function isScanning(p: ProjectSummary): boolean {
-  const st = p.latest?.status
+  const st = p.inFlight?.status
   return st === 'pending' || st === 'running'
 }
 
@@ -380,9 +380,14 @@ useScanEvents(
       return
     }
     const target = projects.value.find((p) => p.id === ev.projectId)
-    if (target?.latest) {
-      target.latest.status = ev.status
-      target.latest.progress = ev.progress
+    if (!target) return
+    // 写 inFlight 而不是 latest：latest 是上一次成功的记录，拿它冒充正在跑的
+    // 会让分数和「扫描中」同时挂在同一条数据上，刷新后还会打回原形
+    if (!target.inFlight) {
+      target.inFlight = { ...target.latest, status: ev.status, progress: ev.progress } as Analysis
+    } else {
+      target.inFlight.status = ev.status
+      target.inFlight.progress = ev.progress
     }
   },
   () => {

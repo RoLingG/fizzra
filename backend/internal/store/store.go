@@ -39,6 +39,10 @@ type AnalysisRepo interface {
 	ListByProject(projectID string, limit int) ([]model.Analysis, error)
 	ListRecent(limit int) ([]model.Analysis, error)
 	LatestForProject(projectID string) (*model.Analysis, error)
+	// InFlightForProject 返回项目正在进行中的分析，没有时返回 ErrNotFound
+	// 与 LatestForProject 不同，那个只要成功的分析，用来展示分数
+	// 界面上的「扫描中」需要一个还在跑的，两者不是同一条记录
+	InFlightForProject(projectID string) (*model.Analysis, error)
 	DeleteByProject(projectID string) error
 	// Trend 返回项目的评分历史，最早的在前
 	Trend(projectID string, limit int) ([]model.Analysis, error)
