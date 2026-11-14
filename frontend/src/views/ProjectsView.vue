@@ -548,6 +548,11 @@ onMounted(load)
             <span class="scanning-dot" />
             {{ t('projectsView.scanning') }}
           </span>
+          <!-- 失败单独显示：落进「从未」分支会让用户以为扫描没启动过
+               详细原因放在项目详情页，列表塞一段命令输出没人看得懂 -->
+          <span v-else-if="row.lastFailed && !row.latest" class="scan-failed">
+            {{ t('projectsView.scanFailed') }}
+          </span>
           <span v-else class="muted">
             {{ row.latest ? formatRelative(row.latest.createdAt) : t('common.never') }}
           </span>
@@ -850,6 +855,12 @@ onMounted(load)
   gap: 6px;
   font-size: 12px;
   color: var(--sev-warning);
+}
+
+.scan-failed {
+  font-size: 12px;
+  color: var(--sev-critical);
+  cursor: help;
 }
 
 .scanning-dot {

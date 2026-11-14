@@ -470,6 +470,7 @@ const en = {
     colIssues: 'Issues',
     colLastScan: 'Last scan',
     scanning: 'Scanning',
+    scanFailed: 'Scan failed',
     scanQueued: 'Scan queued for {name}.',
     editTitle: 'Edit project',
     addTitle: 'Add project',
@@ -542,6 +543,8 @@ const en = {
     notScanned: 'not scanned',
 
     incompleteTag: 'Incomplete',
+    scanFailedTitle: 'The last scan failed',
+    scanFailedHint: 'Resolve the problem above, then press Scan now to try again.',
     incomplete: 'This scan was incomplete ({count} analyzers did not finish)',
     incompleteSub:
       'The analyzers below did not run to completion, so they contributed no findings. Fewer checks than normal means the score is inflated — treat it as unreliable rather than as a result.',

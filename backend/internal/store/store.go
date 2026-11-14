@@ -43,6 +43,10 @@ type AnalysisRepo interface {
 	// 与 LatestForProject 不同，那个只要成功的分析，用来展示分数
 	// 界面上的「扫描中」需要一个还在跑的，两者不是同一条记录
 	InFlightForProject(projectID string) (*model.Analysis, error)
+	// LastFailedForProject 返回最近一次失败的分析，没有时返回 ErrNotFound
+	// 失败的分析不能混进 Latest，那样 0 分会冒充成真实得分
+	// 但界面需要区分「上次扫描失败」和「从未扫描过」
+	LastFailedForProject(projectID string) (*model.Analysis, error)
 	DeleteByProject(projectID string) error
 	// Trend 返回项目的评分历史，最早的在前
 	Trend(projectID string, limit int) ([]model.Analysis, error)

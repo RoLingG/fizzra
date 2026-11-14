@@ -817,6 +817,24 @@ a:hover {
   line-height: 1.55;
 }
 
+/* 扫描失败时展示的命令输出，等宽字体加换行，命令和错误信息不会被挤成一坨 */
+.notice-error {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notice-sub {
+  margin: 6px 0 0;
+  font: var(--t-body-sm);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
 /* 操作列的按钮不能换行：Element Plus 给相邻按钮 12px 左边距，
    单元格一窄就换行，换行后第二个按钮仍带着这段边距，看起来和第一个错开 */
 .el-table td .cell > .el-button + .el-button {

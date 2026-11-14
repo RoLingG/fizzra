@@ -467,6 +467,7 @@ const zh: Catalogue<typeof en> = {
     colIssues: '问题',
     colLastScan: '上次扫描',
     scanning: '扫描中',
+    scanFailed: '扫描失败',
     scanQueued: '已为 {name} 排队扫描。',
     editTitle: '编辑项目',
     addTitle: '添加项目',
@@ -536,6 +537,8 @@ const zh: Catalogue<typeof en> = {
     notScanned: '尚未扫描',
 
     incompleteTag: '不完整',
+    scanFailedTitle: '上次扫描失败',
+    scanFailedHint: '修好上面的问题后，重新点「立即扫描」即可。',
     incomplete: '本次扫描不完整（{count} 个分析器未完成）',
     incompleteSub:
       '以下分析器未能运行到结束，它们没有产生任何结果。由于检查得比正常情况少，本次评分会偏高，不能当作有效结果看待。',

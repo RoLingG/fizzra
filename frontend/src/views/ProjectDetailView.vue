@@ -84,6 +84,14 @@ const savingGate = ref(false)
 
 const project = computed(() => overview.value?.project ?? null)
 const latest = computed(() => overview.value?.latest ?? null)
+// 只在上一次扫描失败、且没有更晚的成功记录时展示，否则用户看的是已经有结论的那次
+const lastFailed = computed(() => {
+  const failed = overview.value?.lastFailed
+  if (!failed) return null
+  const ok = overview.value?.latest
+  if (ok && new Date(ok.createdAt) > new Date(failed.createdAt)) return null
+  return failed
+})
 const history = computed(() => overview.value?.history ?? [])
 const trend = computed<TrendPoint[]>(() => overview.value?.trend ?? [])
 const metrics = computed(() => latest.value?.metrics ?? null)
@@ -372,6 +380,22 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
           </el-button>
         </div>
       </header>
+
+      <!-- 扫描失败排在一切之前：下面所有面板显示的都是「没有数据」，不先说明
+           原因的话读者会以为项目从来没扫过 -->
+      <aside v-if="lastFailed" class="notice notice-danger" v-reveal>
+        <span class="notice-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="16" height="16">
+            <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+        </span>
+        <div class="notice-body">
+          <p class="notice-title">{{ t('project.scanFailedTitle') }}</p>
+          <pre class="notice-error">{{ lastFailed.error }}</pre>
+          <p class="notice-sub">{{ t('project.scanFailedHint') }}</p>
+        </div>
+      </aside>
 
       <aside v-if="latest?.error" class="notice notice-info" v-reveal>
         <span class="notice-mark" aria-hidden="true">

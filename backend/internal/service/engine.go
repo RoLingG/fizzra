@@ -220,7 +220,7 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		a.Progress = 100
 		if runErr != nil {
 			a.Status = model.StatusFailed
-			a.Error = runErr.Error()
+			a.Error = failureDetail(runErr)
 		} else {
 			a.Status = model.StatusSuccess
 		}
@@ -498,6 +498,18 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 	)
 
 	return finish(analysis, nil)
+}
+
+// failureDetail 返回给用户看的失败说明
+//
+// 命令失败时把完整 stderr 带上，不截断也不挑行：详情页有位置放，用户能自己
+// 看出是哪一步、哪个原因。摘要式的短文对排查没用，反而要人再去找一次
+func failureDetail(err error) string {
+	var exitErr *analyzer.ExitError
+	if errors.As(err, &exitErr) && exitErr.Stderr != "" && !exitErr.TimedOut {
+		return err.Error() + "\n\n" + exitErr.Stderr
+	}
+	return err.Error()
 }
 
 // runAnalyzers 按配置的并发度并行执行分析器，返回各自的结果和指标快照

@@ -601,12 +601,34 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("%s exited with status %d: %s", e.Command, e.Code, firstLine(e.Stderr))
 }
 
+// firstLine 从 stderr 里挑一行最有代表性的提示
 func firstLine(s string) string {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			return s[:i]
+	// 这些前缀出现时那一行就是结论，优先于第一行
+	markers := []string{"fatal:", "error:", "cannot ", "failed to ", "unable to "}
+
+	var fallback string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if fallback == "" {
+			fallback = line
+		}
+		lower := strings.ToLower(line)
+		for _, m := range markers {
+			if strings.HasPrefix(lower, m) {
+				return truncateMessage(line)
+			}
 		}
 	}
+	if fallback == "" {
+		return ""
+	}
+	return truncateMessage(fallback)
+}
+
+func truncateMessage(s string) string {
 	if len(s) > 200 {
 		return s[:200]
 	}

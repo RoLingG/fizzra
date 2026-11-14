@@ -54,6 +54,7 @@ export interface AnalysisStats {
 export interface ProjectSummary extends Project {
   latest?: Analysis
   inFlight?: Analysis
+  lastFailed?: Analysis
   stats: AnalysisStats
 }
 
@@ -228,6 +229,7 @@ export interface IssueStats {
 export interface ProjectOverview {
   project: Project
   latest?: Analysis
+  lastFailed?: Analysis
   issueStats?: IssueStats
   history?: Analysis[]
   trend?: TrendPoint[]

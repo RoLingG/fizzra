@@ -139,6 +139,14 @@ func (h *Handler) projectOverview(c *gin.Context) {
 		return
 	}
 
+	// 失败没有分数，但用户需要知道上次为什么没成，详情页据此展示完整原因
+	if failed, err := h.Svc.Data.Analyses().LastFailedForProject(project.ID); err == nil {
+		overview["lastFailed"] = failed
+	} else if !errors.Is(err, store.ErrNotFound) {
+		h.fail(c, err)
+		return
+	}
+
 	if history, err := h.Svc.ListAnalyses(ctx, project.ID, 20); err == nil {
 		overview["history"] = history
 	}

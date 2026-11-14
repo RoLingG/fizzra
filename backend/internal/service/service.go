@@ -446,6 +446,11 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 		} else if !errors.Is(err, store.ErrNotFound) {
 			s.Log.Warn("failed to load in-flight analysis", "project", p.ID, "err", err)
 		}
+		if failed, err := s.Data.Analyses().LastFailedForProject(p.ID); err == nil {
+			summary.LastFailed = failed
+		} else if !errors.Is(err, store.ErrNotFound) {
+			s.Log.Warn("failed to load last failed analysis", "project", p.ID, "err", err)
+		}
 		if stats, err := s.Data.Analyses().Stats(p.ID); err == nil {
 			summary.Stats = stats
 		}
@@ -461,8 +466,11 @@ type ProjectSummary struct {
 	Latest *model.Analysis `json:"latest,omitempty"`
 	// InFlight 是正在进行中的分析，界面据此显示「扫描中」
 	// 与 Latest 分开是因为首次扫描时 Latest 为空，此时仍要能显示正在跑
-	InFlight *model.Analysis     `json:"inFlight,omitempty"`
-	Stats    store.AnalysisStats `json:"stats"`
+	InFlight *model.Analysis `json:"inFlight,omitempty"`
+	// LastFailed 是最近一次失败的分析，界面据此显示「扫描失败」而不是「从未」
+	// 不并进 Latest 是因为失败记录没有分数，混进去会让 0 分冒充成真实得分
+	LastFailed *model.Analysis     `json:"lastFailed,omitempty"`
+	Stats      store.AnalysisStats `json:"stats"`
 }
 
 // ResolveProject 按 ID 或名字查找项目，命令行因此可以混用路径和名字
