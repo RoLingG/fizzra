@@ -31,6 +31,8 @@ func (s Severity) Valid() bool {
 }
 
 // Rank 返回可排序的权重，critical 为 0，info 为 3，未知取 4
+//
+// 调整 AllSeverities 的顺序时，store.backfillSeverityRank 里的 SQL 要同步
 func (s Severity) Rank() int {
 	for i, v := range AllSeverities {
 		if v == s {
@@ -98,7 +100,10 @@ type Issue struct {
 	Analyzer string   `json:"analyzer" gorm:"index;size:64"`
 	Rule     string   `json:"rule" gorm:"index;size:128"`
 	Severity Severity `json:"severity" gorm:"index;size:16"`
-	Message  string   `json:"message" gorm:"type:text"`
+	// SeverityRank 是 severity 的数值形式，供 ORDER BY 使用
+	// 字符串排序按字母序，会把 info 排在 warning 前面
+	SeverityRank int    `json:"-" gorm:"index"`
+	Message      string `json:"message" gorm:"type:text"`
 	// Advice 是可选的修复提示，来自工具或匹配到的自定义规则
 	Advice string `json:"advice" gorm:"type:text"`
 	// Fix 是修改前后对照示例，从产生该问题时的规则复制而来
@@ -156,6 +161,7 @@ func (i Issue) Normalized() Issue {
 	if !i.Severity.Valid() {
 		i.Severity = SeverityWarning
 	}
+	i.SeverityRank = i.Severity.Rank()
 	if i.Status == "" {
 		i.Status = IssueStatusOpen
 	}

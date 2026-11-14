@@ -20,13 +20,28 @@ func NewData(db *DB) *SQLData { return &SQLData{db: db} }
 
 // Migrate 创建或更新每一张表
 func (s *SQLData) Migrate() error {
-	return s.db.AutoMigrate(
+	if err := s.db.AutoMigrate(
 		&model.Project{},
 		&model.Analysis{},
 		&model.Issue{},
 		&model.Rule{},
 		&model.QualityGate{},
-	)
+	); err != nil {
+		return err
+	}
+	return s.backfillSeverityRank()
+}
+
+// backfillSeverityRank 按 severity 重算已有行的 severity_rank
+//
+// 新加的列默认 0，等于把历史问题全标成 critical。只更新确实需要修正的行，
+// 重复执行不会覆盖正常数据，这里的序号必须与 model.Severity.Rank 一致
+func (s *SQLData) backfillSeverityRank() error {
+	return s.db.Exec(`UPDATE issues SET severity_rank = CASE severity
+			WHEN 'critical' THEN 0 WHEN 'error' THEN 1 WHEN 'warning' THEN 2 WHEN 'info' THEN 3
+			ELSE 4 END
+		WHERE severity != 'critical'
+			AND (severity_rank = 0 OR severity_rank IS NULL)`).Error
 }
 
 func (s *SQLData) Projects() ProjectRepo         { return &projectRepo{db: s.db} }
@@ -250,11 +265,11 @@ func (r *issueRepo) applyFilter(q *gorm.DB, analysisID string, f IssueFilter) *g
 		q = q.Where("status IN ?", f.Statuses)
 	}
 	if f.File != "" {
-		q = q.Where("file LIKE ?", "%"+f.File+"%")
+		q = q.Where(`file LIKE ? ESCAPE '\'`, "%"+escapeLike(f.File)+"%")
 	}
 	if f.Search != "" {
-		like := "%" + f.Search + "%"
-		q = q.Where("(message LIKE ? OR file LIKE ? OR rule LIKE ?)", like, like, like)
+		like := "%" + escapeLike(f.Search) + "%"
+		q = q.Where(`(message LIKE ? ESCAPE '\' OR file LIKE ? ESCAPE '\' OR rule LIKE ? ESCAPE '\')`, like, like, like)
 	}
 	if f.NewOnly {
 		q = q.Where("is_new = ?", true)
@@ -265,12 +280,12 @@ func (r *issueRepo) applyFilter(q *gorm.DB, analysisID string, f IssueFilter) *g
 func (r *issueRepo) ListByAnalysis(analysisID string, f IssueFilter) ([]model.Issue, error) {
 	q := r.applyFilter(r.db.Model(&model.Issue{}), analysisID, f)
 
-	order := "severity ASC, file ASC, line ASC"
+	order := "severity_rank ASC, file ASC, line ASC"
 	switch f.OrderBy {
 	case "file":
 		order = "file ASC, line ASC"
 	case "analyzer":
-		order = "analyzer ASC, severity ASC"
+		order = "analyzer ASC, severity_rank ASC"
 	case "recent":
 		order = "created_at DESC"
 	}
@@ -415,6 +430,13 @@ func (r *issueRepo) FingerprintsByProject(projectID string, limit int) (map[stri
 
 func (r *issueRepo) DeleteByProject(projectID string) error {
 	return translateError(r.db.Delete(&model.Issue{}, "project = ?", projectID).Error)
+}
+
+// escapeLike 转义 LIKE 的通配符，用户搜 50% 时不应匹配到全部记录
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	return strings.ReplaceAll(s, "_", `\_`)
 }
 
 func toAny[T any](in []T) []any {
