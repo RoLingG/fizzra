@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
@@ -176,6 +176,187 @@ async function copy(text: string) {
     // 剪贴板 API 仅在安全上下文可用，失败时静默，值本身仍可见
   }
 }
+
+type CiLanguage = 'go' | 'rust' | 'python' | 'javascript' | 'java' | 'csharp' | 'cpp' | 'php'
+
+const ciPlatform = ref<'github' | 'gitlab'>('github')
+const ciLanguage = ref<CiLanguage>('go')
+
+const ciLanguages: CiLanguage[] = ['go', 'rust', 'python', 'javascript', 'java', 'csharp', 'cpp', 'php']
+
+// 每种语言的运行时与分析器安装。GitHub 版直接写进 steps，GitLab 版写进 before_script，
+// 两边的命令来自同一个来源，只是缩进不同
+const ciSetup: Record<CiLanguage, { github: string; gitlab: string[]; image: string }> = {
+  go: {
+    github: `      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install analyzers
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"`,
+    gitlab: [
+      'go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest',
+      'go install github.com/securego/gosec/v2/cmd/gosec@latest',
+      'go install golang.org/x/vuln/cmd/govulncheck@latest',
+      'export PATH="$PATH:$(go env GOPATH)/bin"',
+    ],
+    image: 'golang:1.27',
+  },
+  rust: {
+    github: `      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install analyzers
+        run: cargo install cargo-audit --locked`,
+    gitlab: ['rustup component add clippy rustfmt', 'cargo install cargo-audit --locked'],
+    image: 'rust:1.83',
+  },
+  python: {
+    github: `      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install analyzers
+        run: pip install ruff`,
+    gitlab: ['pip install ruff'],
+    image: 'python:3.12',
+  },
+  javascript: {
+    github: `      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install analyzers
+        run: |
+          npm i -g oxlint @biomejs/biome
+          # tsc 用的是项目自己的 typescript，不要装全局
+          npm ci`,
+    gitlab: ['npm i -g oxlint @biomejs/biome', 'npm ci'],
+    image: 'node:22',
+  },
+  java: {
+    github: `      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install analyzers
+        run: |
+          pmd_ver=$(curl -fsSL https://api.github.com/repos/pmd/pmd/releases/latest | jq -r '.tag_name | sub("pmd_releases/"; "")')
+          curl -fsSL -o /tmp/pmd.zip "https://github.com/pmd/pmd/releases/download/pmd_releases%2F\${pmd_ver}/pmd-dist-\${pmd_ver}-bin.zip"
+          unzip -q /tmp/pmd.zip -d /opt
+          echo "/opt/pmd-bin-\${pmd_ver}/bin" >> "$GITHUB_PATH"
+
+          sp_ver=$(curl -fsSL https://api.github.com/repos/spotbugs/spotbugs/releases/latest | jq -r '.tag_name')
+          curl -fsSL -o /tmp/spotbugs.tgz "https://github.com/spotbugs/spotbugs/releases/download/\${sp_ver}/spotbugs-\${sp_ver}.tgz"
+          tar xzf /tmp/spotbugs.tgz -C /opt
+          echo "/opt/spotbugs-\${sp_ver}/bin" >> "$GITHUB_PATH"`,
+    gitlab: [
+      'apt-get update && apt-get install -y curl jq unzip',
+      'curl -fsSL -o /tmp/pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.8.0/pmd-dist-7.8.0-bin.zip',
+      'unzip -q /tmp/pmd.zip -d /opt && export PATH="$PATH:/opt/pmd-bin-7.8.0/bin"',
+    ],
+    image: 'maven:3.9-eclipse-temurin-21',
+  },
+  csharp: {
+    github: `      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install analyzers
+        run: |
+          dotnet tool install --global Roslynator.DotNet.Cli
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"`,
+    gitlab: ['dotnet tool install --global Roslynator.DotNet.Cli', 'export PATH="$PATH:$HOME/.dotnet/tools"'],
+    image: 'mcr.microsoft.com/dotnet/sdk:8.0',
+  },
+  cpp: {
+    github: `      - name: Install analyzers
+        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy`,
+    gitlab: ['apt-get update && apt-get install -y cppcheck clang-tidy'],
+    image: 'gcc:14',
+  },
+  php: {
+    github: `      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - name: Install analyzers
+        run: |
+          curl -fsSL -o /usr/local/bin/phpstan.phar https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar
+          chmod +x /usr/local/bin/phpstan.phar`,
+    gitlab: [
+      'curl -fsSL -o /usr/local/bin/phpstan.phar https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar',
+      'chmod +x /usr/local/bin/phpstan.phar',
+    ],
+    image: 'php:8.3-cli',
+  },
+}
+
+const ciSnippet = computed(() => {
+  const setup = ciSetup[ciLanguage.value]
+
+  if (ciPlatform.value === 'github') {
+    return `# .github/workflows/fizzra.yml
+name: Code quality
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  fizzra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+${setup.github}
+
+      - uses: RoLingG/fizzra@v0.1.8
+        with:
+          fail-on: critical,error
+          reports: sarif,json,html`
+  }
+
+  const before = setup.gitlab.map((line) => `    - ${line}`).join('\n')
+  return `# .gitlab-ci.yml
+fizzra:
+  image: ${setup.image}
+  stage: test
+  before_script:
+${before}
+  script:
+    - fizzra ci . --format sarif --output fizzra.sarif --fail-on critical,error
+  artifacts:
+    when: always
+    reports:
+      sarif: fizzra.sarif`
+})
+
+// 模板长短随语言变化，量出实际高度写回容器，高度才能过渡而不是跳变
+const snippetWrap = ref<HTMLElement>()
+const snippetHeight = ref('auto')
+
+watch(ciSnippet, async (_next, prev) => {
+  if (!prev) {
+    snippetHeight.value = 'auto'
+    return
+  }
+  const wrap = snippetWrap.value
+  const pre = wrap?.querySelector('pre')
+  if (!wrap || !pre) return
+
+  // 锁住当前高度作为起点，下一帧再改成新内容的高度
+  snippetHeight.value = `${wrap.getBoundingClientRect().height}px`
+  await nextTick()
+  snippetHeight.value = `${pre.getBoundingClientRect().height}px`
+})
 
 onMounted(async () => {
   try {
@@ -401,17 +582,32 @@ onMounted(async () => {
       <section class="card panel" v-reveal>
         <h2 class="section-title">{{ t('system.ciIntegration') }}</h2>
         <p class="muted sub">{{ t('system.ciBody') }}</p>
-        <pre class="mono snippet"># GitHub Actions
-- name: Fizzra
-  run: |
-    go run ./backend/cmd/fizzra ci \
-      --format sarif \
-      --output fizzra.sarif
 
-- name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v3
-  with:
-    sarif_file: fizzra.sarif</pre>
+        <el-tabs v-model="ciPlatform" class="ci-tabs">
+          <el-tab-pane label="GitHub Actions" name="github" />
+          <el-tab-pane label="GitLab CI" name="gitlab" />
+        </el-tabs>
+
+        <div class="ci-controls">
+          <el-radio-group v-model="ciLanguage" size="small" class="ci-langs">
+            <el-radio-button v-for="lang in ciLanguages" :key="lang" :value="lang">
+              {{ t(`system.ciLang_${lang}`) }}
+            </el-radio-button>
+          </el-radio-group>
+          <el-button size="small" text :icon="'CopyDocument'" @click="copy(ciSnippet)">
+            {{ t('common.copy') }}
+          </el-button>
+        </div>
+
+        <ol class="ci-steps">
+          <li>{{ t('system.ciStep1') }}</li>
+          <li>{{ t('system.ciStep2') }}</li>
+          <li>{{ t('system.ciStep3') }}</li>
+        </ol>
+
+        <div ref="snippetWrap" class="snippet-wrap" :style="{ height: snippetHeight }">
+          <pre class="mono snippet">{{ ciSnippet }}</pre>
+        </div>
         <p class="muted sub">{{ t('system.ciNote') }}</p>
       </section>
     </template>
@@ -714,8 +910,57 @@ onMounted(async () => {
   max-width: min(100%, 1200px);
 }
 
+.ci-tabs {
+  margin-bottom: 4px;
+}
+
+.ci-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
+}
+
+.ci-langs {
+  flex-wrap: wrap;
+}
+
+.ci-langs :deep(.el-radio-button__inner) {
+  width: 72px;
+  padding-left: 0;
+  padding-right: 0;
+  text-align: center;
+}
+
+.ci-steps {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+
+.ci-steps li::marker {
+  color: var(--text-soft);
+}
+
+.ci-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ci-controls .el-button {
+  margin-left: auto;
+}
+
+.snippet-wrap {
+  overflow: hidden;
+  margin-bottom: 10px;
+  transition: height 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .snippet {
-  margin: 0 0 10px;
+  margin: 0;
   padding: 13px;
   background: var(--bg);
   border: 1px solid var(--border);

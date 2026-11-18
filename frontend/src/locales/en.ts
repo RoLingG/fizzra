@@ -700,6 +700,11 @@ const en = {
     deleteRule: 'Delete rule',
     editTitle: 'Edit rule',
     newTitle: 'New rule',
+    sectionBasic: 'Basics',
+    sectionBasicNote: 'The name and severity this rule is listed under.',
+    sectionMatch: 'Where it matches',
+    sectionMatchNote: 'The patterns decide what is flagged; the two fields below decide which files.',
+    sectionAdviceNote: 'Shown in the issue drawer and in reports.',
     formName: 'Name',
     formSeverity: 'Severity',
     formMessage: 'Message',
@@ -852,7 +857,19 @@ const en = {
       'That does not mean every project can run every check: tools installed per project are supplied by the project.',
     ciBody:
       'The CI command runs the same analyzers and applies the same quality gate, so a green build means the same thing locally and in the pipeline.',
-    ciNote: 'The GitLab template also ships a non-blocking merge-request advisory job.',
+    ciLang_go: 'Go',
+    ciLang_rust: 'Rust',
+    ciLang_python: 'Python',
+    ciLang_javascript: 'JS / TS',
+    ciLang_java: 'Java',
+    ciLang_csharp: 'C#',
+    ciLang_cpp: 'C / C++',
+    ciLang_php: 'PHP',
+    ciStep1: 'Pick a language and copy the file below.',
+    ciStep2: 'On GitHub save it as .github/workflows/fizzra.yml; on GitLab merge it into .gitlab-ci.yml.',
+    ciStep3: 'Push a commit and the pipeline runs. A missing tool skips that analyzer instead of failing the build.',
+    ciNote:
+      'A failed gate turns the build red; the reports are kept as artifacts either way. Loosen or tighten it with fail-on, or gate on the score with min-score.',
   },
 
   issueDetail: {

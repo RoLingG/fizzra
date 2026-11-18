@@ -356,7 +356,38 @@ onMounted(load)
       width="640px"
       :close-on-click-modal="false"
     >
+      <template #header="{ titleId, titleClass }">
+        <div class="dialog-head">
+          <div class="dialog-head-main">
+            <span :id="titleId" :class="titleClass" class="dialog-title">
+              {{ editingId ? t('rulesView.editTitle') : t('rulesView.newTitle') }}
+            </span>
+            <label class="dialog-enabled">
+              <el-switch v-model="form.enabled" size="small" />
+              <span class="dialog-enabled-text">
+                {{ form.enabled ? t('rulesView.enabled') : t('rulesView.disabled') }}
+              </span>
+            </label>
+          </div>
+          <button
+            type="button"
+            class="dialog-close"
+            :aria-label="t('common.close')"
+            @click="dialogOpen = false"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </template>
+
       <el-form ref="formRef" :model="form" :rules="rules_" label-position="top">
+        <div class="section-head">
+          <span class="section-title">{{ t('rulesView.sectionBasic') }}</span>
+          <span class="section-note">{{ t('rulesView.sectionBasicNote') }}</span>
+        </div>
+
         <div class="grid-2">
           <el-form-item :label="t('rulesView.formName')" prop="name">
             <el-input
@@ -376,11 +407,16 @@ onMounted(load)
           <el-input v-model="form.message" :placeholder="t('rulesView.phMessage')" />
         </el-form-item>
 
+        <div class="section-head">
+          <span class="section-title">{{ t('rulesView.sectionMatch') }}</span>
+          <span class="section-note">{{ t('rulesView.sectionMatchNote') }}</span>
+        </div>
+
         <el-form-item :label="t('rulesView.formPatterns')" required>
           <el-input
             v-model="form.patterns"
             type="textarea"
-            :rows="4"
+            :rows="3"
             :placeholder="t('rulesView.phPatterns')"
             @blur="validatePatterns"
           />
@@ -388,28 +424,29 @@ onMounted(load)
           <div v-else class="field-hint muted">{{ t('rulesView.hintPatterns') }}</div>
         </el-form-item>
 
-        <el-form-item :label="t('rulesView.formAdvice')">
-          <el-input
-            v-model="form.advice"
-            type="textarea"
-            :rows="3"
-            :placeholder="t('rulesView.phAdvice')"
-          />
-        </el-form-item>
-
         <div class="grid-2">
           <el-form-item :label="t('rulesView.formPaths')">
-            <el-input v-model="form.paths" type="textarea" :rows="3" placeholder="**/*.go" />
+            <el-input v-model="form.paths" type="textarea" :rows="2" placeholder="**/*.go" />
             <div class="field-hint muted">{{ t('rulesView.hintPaths') }}</div>
           </el-form-item>
           <el-form-item :label="t('rulesView.formExclude')">
-            <el-input v-model="form.exclude" type="textarea" :rows="3" placeholder="**/*_test.go" />
+            <el-input v-model="form.exclude" type="textarea" :rows="2" placeholder="**/*_test.go" />
             <div class="field-hint muted">{{ t('rulesView.hintExclude') }}</div>
           </el-form-item>
         </div>
 
-        <el-form-item :label="t('rulesView.formEnabled')">
-          <el-switch v-model="form.enabled" />
+        <div class="section-head">
+          <span class="section-title">{{ t('rulesView.formAdvice') }}</span>
+          <span class="section-note">{{ t('rulesView.sectionAdviceNote') }}</span>
+        </div>
+
+        <el-form-item>
+          <el-input
+            v-model="form.advice"
+            type="textarea"
+            :rows="2"
+            :placeholder="t('rulesView.phAdvice')"
+          />
         </el-form-item>
       </el-form>
 
@@ -544,15 +581,164 @@ onMounted(load)
 }
 
 .field-hint {
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 7px;
 }
 
 .error {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--sev-error);
-  margin-top: 3px;
-  line-height: 1.45;
+  margin-top: 7px;
+  line-height: 1.5;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dialog-head-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog-title {
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dialog-enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.dialog-enabled :deep(.el-switch) {
+  margin-right: 0;
+}
+
+.dialog-enabled-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.dialog-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  margin-left: auto;
+  transition:
+    background 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
+}
+
+.dialog-close:hover {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.dialog-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.section-head:not(:first-child) {
+  margin-top: 12px;
+}
+
+.section-title {
+  flex: none;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 640;
+  color: var(--text);
+}
+
+.section-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+:deep(.el-dialog__headerbtn) {
+  display: none;
+}
+
+:deep(.el-dialog__header) {
+  padding: 22px 28px 0;
+  margin-right: 0;
+}
+
+:deep(.el-dialog__body) {
+  padding: 20px 28px;
+}
+
+:deep(.el-dialog__footer) {
+  padding: 16px 28px 22px;
+}
+
+:deep(.el-overlay-dialog) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:deep(.el-dialog) {
+  margin-top: 0;
+}
+
+:deep(.el-dialog .el-form-item) {
+  --el-form-item-margin-bottom: 12px;
+}
+
+:deep(.el-dialog .el-form-item__label) {
+  margin-bottom: 8px;
+  line-height: 1.4;
+  height: auto;
+}
+
+:deep(.el-dialog .el-input__wrapper),
+:deep(.el-dialog .el-select__wrapper) {
+  min-height: 42px;
+  padding: 0 13px;
+  border-radius: var(--r-sm);
+}
+
+:deep(.el-dialog .el-input__inner) {
+  font-size: 14px;
+}
+
+:deep(.el-dialog .el-textarea__inner) {
+  padding: 11px 13px;
+  border-radius: var(--r-sm);
+  font-size: 14px;
+}
+
+:deep(.el-dialog .el-button) {
+  height: 40px;
+  padding: 0 24px;
+  border-radius: var(--r-pill);
 }
 
 @media (max-width: 760px) {
