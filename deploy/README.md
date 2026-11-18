@@ -24,7 +24,7 @@ jobs:
         with:
           go-version: '1.27.3'   # must satisfy go.mod
 
-      - uses: RoLingG/fizzra@v0.1.3
+      - uses: RoLingG/fizzra@v0.1.8
         with:
           fail-on: critical
 ```
@@ -75,7 +75,7 @@ job. It lists every analyzer as `ready` or `missing`, with the install command
 for the missing ones:
 
 ```yaml
-- uses: RoLingG/fizzra@v0.1.7
+- uses: RoLingG/fizzra@v0.1.8
 - run: fizzra analyzers
 ```
 
@@ -121,7 +121,7 @@ Two independent ways to fail a build. `fail-on` counts findings by severity;
 
 ```yaml
 # Fail on any critical or error finding, and also below 80 points.
-- uses: RoLingG/fizzra@v0.1.3
+- uses: RoLingG/fizzra@v0.1.8
   with:
     fail-on: critical,error
     min-score: '80'
@@ -137,7 +137,7 @@ One list of formats. Every file it names is written from the **same analysis**
 
 ```yaml
 # SARIF for code scanning plus JSON and HTML for humans.
-- uses: RoLingG/fizzra@v0.1.3
+- uses: RoLingG/fizzra@v0.1.8
   with:
     reports: sarif,json,html
 ```
@@ -170,7 +170,7 @@ Empty runs every analyzer applicable to the detected language. Naming a subset
 is how you trade coverage for speed:
 
 ```yaml
-- uses: RoLingG/fizzra@v0.1.3
+- uses: RoLingG/fizzra@v0.1.8
   with:
     analyzers: custom,metrics      # no external tools needed, runs in seconds
 ```
@@ -181,7 +181,7 @@ Scans a subdirectory instead of the repository root. Useful in a monorepo
 where each package has its own workflow:
 
 ```yaml
-- uses: RoLingG/fizzra@v0.1.3
+- uses: RoLingG/fizzra@v0.1.8
   with:
     path: services/api
 ```
@@ -197,7 +197,7 @@ where each package has its own workflow:
 Consume them in later steps:
 
 ```yaml
-- uses: RoLingG/fizzra@v0.1.3
+- uses: RoLingG/fizzra@v0.1.8
   id: scan
 
 - run: echo "Scored ${{ steps.scan.outputs.score }} (${{ steps.scan.outputs.gate }})"
