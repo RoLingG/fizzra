@@ -1,6 +1,6 @@
 {
   "name": "fizzra-dashboard",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "description": "Web dashboard for Fizzra — lightweight code quality review for Go/Wails projects",

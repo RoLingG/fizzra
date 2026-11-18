@@ -30,6 +30,7 @@ backend/internal/web/dist/*
 # Scratch space, documentation and demos.
 /demo/
 /docs/
+/.demo-projects/
 
 # Tests are not part of the published tree
 *_test.go

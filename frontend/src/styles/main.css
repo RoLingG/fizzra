@@ -22,6 +22,10 @@ html {
   scrollbar-gutter: stable;
 }
 
+body.el-popup-parent--hidden {
+  width: auto !important;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -565,15 +569,27 @@ a:hover {
    文字和图标要压在填充层之上，Element Plus 把图标和文字 span 放在同一层级，
    只给 span 设 z-index 会漏掉图标，所以统一处理按钮的直接子元素 */
 .el-button--primary {
+  --el-button-bg-color: var(--text);
+  --el-button-border-color: var(--text);
+  --el-button-text-color: var(--on-accent);
+  --el-button-hover-bg-color: var(--surface);
+  --el-button-hover-border-color: var(--text);
+  --el-button-hover-text-color: var(--text);
+  --el-button-active-bg-color: var(--surface);
+  --el-button-active-border-color: var(--text);
+  --el-button-active-text-color: var(--text);
+}
+
+.el-button--primary.soda {
   --el-button-bg-color: transparent;
   --el-button-border-color: var(--text);
   --el-button-hover-bg-color: transparent;
   --el-button-hover-border-color: var(--text);
   --el-button-text-color: var(--text);
-  --el-button-hover-text-color: var(--on-accent);
+  --el-button-hover-text-color: var(--text);
   --el-button-active-bg-color: var(--text);
   --el-button-active-border-color: var(--text);
-  --el-button-active-text-color: var(--on-accent);
+  --el-button-active-text-color: var(--text);
 
   position: relative;
   isolation: isolate;
@@ -588,14 +604,14 @@ a:hover {
 
 /* 填充层是一张 canvas，由 useSodaFill.ts 挂在按钮最前面
    inset: 0 让画布贴合按钮圆角，按钮自身的 overflow: hidden 负责裁切 */
-.el-button--primary .soda-fill {
+.el-button--primary.soda .soda-fill {
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
 }
 
-.el-button--primary .soda-fill canvas {
+.el-button--primary.soda .soda-fill canvas {
   display: block;
   width: 100%;
   height: 100%;
@@ -603,21 +619,22 @@ a:hover {
 
 /* 图标、文字 span 及其它直接子元素都压到填充层之上
    Element Plus 把图标和文字放在同一层级，只给 span 设 z-index 会漏掉图标 */
-.el-button--primary > *:not(.soda-fill) {
+.el-button--primary.soda > *:not(.soda-fill) {
   position: relative;
   z-index: 1;
 }
 
-.el-button--primary:hover,
-.el-button--primary:focus-visible {
+.el-button--primary.soda.is-filled,
+.el-button--primary.soda.is-filled:hover,
+.el-button--primary.soda.is-filled:active {
   background: transparent;
   color: var(--on-accent);
   border-color: var(--text);
 }
 
 /* 禁用和 loading 保持库里的灰色处理，填充层不能盖上去 */
-.el-button--primary.is-disabled,
-.el-button--primary.is-loading {
+.el-button--primary.soda.is-disabled,
+.el-button--primary.soda.is-loading {
   --el-button-hover-bg-color: transparent;
   --el-button-hover-border-color: var(--el-disabled-border-color);
   --el-button-hover-text-color: var(--el-disabled-text-color);
@@ -628,18 +645,16 @@ a:hover {
 
 /* 禁用和 loading 时把画布藏掉。元素本身拿不到 hover，动画不会启动，
    这里只保证它不盖住库自己的灰色背景 */
-.el-button--primary.is-disabled .soda-fill,
-.el-button--primary.is-loading .soda-fill {
+.el-button--primary.soda.is-disabled .soda-fill,
+.el-button--primary.soda.is-loading .soda-fill {
   display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .el-button--primary .soda-fill {
+  .el-button--primary.soda .soda-fill {
     display: none;
   }
-  .el-button--primary:hover,
-  .el-button--primary:focus-visible,
-  .el-button--primary:active {
+  .el-button--primary.soda.is-filled {
     background: var(--text);
     color: var(--on-accent);
   }
@@ -868,6 +883,26 @@ a:hover {
 /* 只有主体滚动，头和脚固定 */
 .el-dialog__body {
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.el-dialog__body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.el-dialog__body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.el-dialog__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.el-dialog__footer .el-button {
+  min-width: 88px;
+  height: 36px;
 }
 
 /* 矮弹窗单独定位：6vh 是给长表单定的，

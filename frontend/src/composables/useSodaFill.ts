@@ -74,12 +74,14 @@ class Soda {
     host.prepend(this.element)
 
     host.addEventListener('pointerenter', this.onEnter)
-    host.addEventListener('focus', this.onEnter)
     host.addEventListener('pointerleave', this.onLeave)
     host.addEventListener('blur', this.onLeave)
+    host.addEventListener('pointercancel', this.onLeave)
   }
 
-  private onEnter = (): void => {
+  private onEnter = (event: PointerEvent): void => {
+    if (event.pointerType === 'touch') return
+    this.host.classList.add('is-filled')
     if (this.reduceMotion) return
     this.readPalette()
     this.resize()
@@ -93,6 +95,8 @@ class Soda {
   }
 
   private onLeave = (): void => {
+    this.host.classList.remove('is-filled')
+    if (this.phase === 'retreat') return
     if (this.phase === 'idle' || this.progress <= 0) {
       this.reset()
       return
@@ -354,7 +358,7 @@ class Soda {
   }
 
   /** 立即复位到初始状态，供 onLeave 和退潮结束后调用 */
-  private reset(): void {
+  reset(): void {
     if (this.raf) cancelAnimationFrame(this.raf)
     this.raf = 0
     this.last = 0
@@ -364,17 +368,31 @@ class Soda {
     this.completed = false
     this.trail.length = 0
     this.ctx.clearRect(0, 0, this.W, this.H)
+    this.host.classList.remove('is-filled')
   }
 
   destroy(): void {
     this.reset()
+    live.delete(this)
     this.host.removeEventListener('pointerenter', this.onEnter)
-    this.host.removeEventListener('focus', this.onEnter)
     this.host.removeEventListener('pointerleave', this.onLeave)
     this.host.removeEventListener('blur', this.onLeave)
+    this.host.removeEventListener('pointercancel', this.onLeave)
     this.element.remove()
   }
 }
+
+if (typeof window !== 'undefined') {
+  const resetAll = (): void => {
+    for (const soda of live) soda.reset()
+  }
+  window.addEventListener('blur', resetAll)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) resetAll()
+  })
+}
+
+const live = new Set<Soda>()
 
 /* 全局委托。主按钮散落在多个视图里，异步渲染和对话框里的按钮运行时才进 DOM，
    逐个挂指令容易漏，这里用 MutationObserver 统一接管 */
@@ -384,14 +402,26 @@ const attached = new WeakMap<HTMLElement, Soda>()
 /** 给一个主按钮挂上汽水填充。重复调用是空操作 */
 export function attachSoda(button: HTMLElement): void {
   if (attached.has(button)) return
-  attached.set(button, new Soda(button))
+  const soda = new Soda(button)
+  attached.set(button, soda)
+  live.add(soda)
 }
 
-const SELECTOR = '.el-button--primary'
+const SELECTOR = '.el-button--primary.soda'
 
 function scan(root: ParentNode): void {
   if (root instanceof HTMLElement && root.matches(SELECTOR)) attachSoda(root)
   for (const el of root.querySelectorAll<HTMLElement>(SELECTOR)) attachSoda(el)
+}
+
+function detach(root: Node): void {
+  if (!(root instanceof HTMLElement)) return
+  for (const el of [root, ...root.querySelectorAll<HTMLElement>(SELECTOR)]) {
+    const soda = attached.get(el)
+    if (!soda) continue
+    attached.delete(el)
+    soda.destroy()
+  }
 }
 
 let installed = false
@@ -408,6 +438,7 @@ export function installSodaFill(): void {
       for (const node of record.addedNodes) {
         if (node instanceof HTMLElement) scan(node)
       }
+      for (const node of record.removedNodes) detach(node)
     }
   })
   observer.observe(document.body, { childList: true, subtree: true })

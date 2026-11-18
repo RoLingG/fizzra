@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import { projectApi, reportError, systemApi } from '@/api/client'
@@ -24,6 +24,11 @@ const { formatRelative, languageLabel } = useFormat()
 // 语言决定运行哪些分析器
 const languageOptions: ProjectLanguage[] = ['go', 'rust', 'python', 'javascript', 'java', 'csharp', 'cpp', 'php']
 
+const kindOptions = [
+  { value: '' as ProjectKind, title: 'kindGo', note: 'kindGoNote' },
+  { value: 'wails' as ProjectKind, title: 'kindWails', note: 'wailsNote' },
+]
+
 const loading = ref(true)
 const projects = ref<ProjectSummary[]>([])
 const analyzers = ref<AnalyzerReadiness[]>([])
@@ -32,6 +37,32 @@ const dialogOpen = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
+const step = ref(1)
+const kindGroup = ref<HTMLElement>()
+
+const confirmOpen = ref(false)
+const confirmTitle = ref('')
+const confirmBody = ref('')
+const confirmWord = ref('')
+const confirmTyped = ref('')
+let confirmResolve: ((ok: boolean) => void) | null = null
+
+function askConfirm(title: string, body: string, word = ''): Promise<boolean> {
+  confirmTitle.value = title
+  confirmBody.value = body
+  confirmWord.value = word
+  confirmTyped.value = ''
+  confirmOpen.value = true
+  return new Promise((resolve) => {
+    confirmResolve = resolve
+  })
+}
+
+function settleConfirm(ok: boolean) {
+  confirmOpen.value = false
+  confirmResolve?.(ok)
+  confirmResolve = null
+}
 
 const form = reactive({
   name: '',
@@ -118,6 +149,12 @@ async function load() {
   }
 }
 
+function openDialog() {
+  step.value = 1
+  dialogOpen.value = true
+  formRef.value?.clearValidate()
+}
+
 function openCreate() {
   editingId.value = null
   Object.assign(form, {
@@ -132,8 +169,7 @@ function openCreate() {
     color: '#3b82f6',
     analyzers: [],
   })
-  dialogOpen.value = true
-  formRef.value?.clearValidate()
+  openDialog()
 }
 
 function openEdit(project: ProjectSummary) {
@@ -151,8 +187,23 @@ function openEdit(project: ProjectSummary) {
     color: project.color || '#3b82f6',
     analyzers: project.defaultAnalyzers ?? [],
   })
-  dialogOpen.value = true
-  formRef.value?.clearValidate()
+  openDialog()
+}
+
+function stepKind(delta: number) {
+  const index = kindOptions.findIndex((option) => option.value === form.kind)
+  const nextIndex = (index + delta + kindOptions.length) % kindOptions.length
+  form.kind = kindOptions[nextIndex].value
+  kindGroup.value?.querySelectorAll<HTMLElement>('.choice')[nextIndex]?.focus()
+}
+
+async function goStep2() {  const field = form.sourceType === 'repo' ? 'repoUrl' : 'localPath'
+  try {
+    await formRef.value?.validateField(['name', field])
+  } catch {
+    return
+  }
+  step.value = 2
 }
 
 async function save() {
@@ -192,20 +243,11 @@ async function save() {
 }
 
 async function remove(project: ProjectSummary) {
-  try {
-    await ElMessageBox.confirm(
-      t('projectsView.deleteBody', { name: project.name }),
-      t('projectsView.deleteTitle'),
-      {
-        confirmButtonText: t('common.delete'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger',
-      },
-    )
-  } catch {
-    return
-  }
+  const ok = await askConfirm(
+    t('projectsView.deleteTitle'),
+    t('projectsView.deleteBody', { name: project.name }),
+  )
+  if (!ok) return
 
   try {
     await projectApi.remove(project.id)
@@ -326,19 +368,12 @@ async function removeSelected() {
     ? t('projectsView.deleteManyBodyMore', { names: preview, count: names.length })
     : t('projectsView.deleteManyBody', { names: preview })
 
-  try {
-    await ElMessageBox.prompt(body, t('projectsView.deleteManyTitle', { count: names.length }), {
-      confirmButtonText: t('common.delete'),
-      cancelButtonText: t('common.cancel'),
-      type: 'warning',
-      confirmButtonClass: 'el-button--danger',
-      inputPlaceholder: DELETE_CONFIRM_WORD,
-      inputPattern: new RegExp(`^${DELETE_CONFIRM_WORD}$`),
-      inputErrorMessage: t('projectsView.deleteManyConfirmError', { word: DELETE_CONFIRM_WORD }),
-    })
-  } catch {
-    return
-  }
+  const ok = await askConfirm(
+    t('projectsView.deleteManyTitle', { count: names.length }),
+    body,
+    DELETE_CONFIRM_WORD,
+  )
+  if (!ok) return
 
   deleting.value = true
   try {
@@ -381,8 +416,6 @@ useScanEvents(
     }
     const target = projects.value.find((p) => p.id === ev.projectId)
     if (!target) return
-    // 写 inFlight 而不是 latest：latest 是上一次成功的记录，拿它冒充正在跑的
-    // 会让分数和「扫描中」同时挂在同一条数据上，刷新后还会打回原形
     if (!target.inFlight) {
       target.inFlight = { ...target.latest, status: ev.status, progress: ev.progress } as Analysis
     } else {
@@ -391,7 +424,6 @@ useScanEvents(
     }
   },
   () => {
-    // 重连期间可能漏掉结束事件，连上后补一次
     if (!loading.value) void load()
   },
 )
@@ -406,7 +438,7 @@ onMounted(load)
         <h1 class="page-title">{{ t('nav.projects') }}</h1>
         <p class="page-sub intro">{{ t('projectsView.intro') }}</p>
       </div>
-      <el-button type="primary" :icon="'Plus'" @click="openCreate">
+      <el-button type="primary" class="soda" :icon="'Plus'" @click="openCreate">
         {{ t('projectsView.addProject') }}
       </el-button>
     </div>
@@ -427,8 +459,6 @@ onMounted(load)
       </el-button>
     </div>
 
-    <!-- v-reveal 套在外层，不能挂在 <el-table> 上：入场时表格处在 translateY 状态，
-         el-table 挂载时按当前盒子分配列宽会算错，行下方会冒出横向滚动条 -->
     <div v-reveal>
       <el-table
         v-loading="loading"
@@ -504,7 +534,6 @@ onMounted(load)
         sortable="custom"
       >
         <template #default="{ row }">
-          <!-- 扫描进行中时没有门禁结果，直接读 gate 键会渲染出未解析的 `gate.` -->
           <el-tag
             v-if="row.latest?.gateStatus"
             :type="statusTagType(row.latest.gateStatus)"
@@ -548,8 +577,6 @@ onMounted(load)
             <span class="scanning-dot" />
             {{ t('projectsView.scanning') }}
           </span>
-          <!-- 失败单独显示：落进「从未」分支会让用户以为扫描没启动过
-               详细原因放在项目详情页，列表塞一段命令输出没人看得懂 -->
           <span v-else-if="row.lastFailed && !row.latest" class="scan-failed">
             {{ t('projectsView.scanFailed') }}
           </span>
@@ -600,105 +627,243 @@ onMounted(load)
       width="560px"
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-        <el-form-item :label="t('projectsView.formName')" prop="name">
-          <el-input v-model="form.name" :placeholder="t('projectsView.phName')" />
-        </el-form-item>
-
-        <el-form-item :label="t('projectsView.formDescription')">
-          <el-input
-            v-model="form.description"
-            type="textarea"
-            :rows="2"
-            :placeholder="t('projectsView.phOptional')"
-          />
-        </el-form-item>
-
-        <el-form-item :label="t('projectsView.formSource')">
-          <el-radio-group v-model="form.sourceType" @change="onSourceChange">
-            <el-radio-button value="local">{{ t('projectsView.sourceLocal') }}</el-radio-button>
-            <el-radio-button value="repo">{{ t('projectsView.sourceRepo') }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item
-          v-if="form.sourceType === 'local'"
-          :label="t('projectsView.formLocalPath')"
-          prop="localPath"
-        >
-          <el-input v-model="form.localPath" :placeholder="t('projectsView.phLocalPath')" />
-          <div class="field-hint muted">{{ t('projectsView.hintLocalPath') }}</div>
-        </el-form-item>
-
-        <template v-else>
-          <el-form-item :label="t('projectsView.formRepoUrl')" prop="repoUrl">
-            <el-input v-model="form.repoUrl" :placeholder="t('projectsView.phRepoUrl')" />
-            <div class="field-hint muted">{{ t('projectsView.hintRepoUrl') }}</div>
-          </el-form-item>
-
-          <el-form-item :label="t('projectsView.formBranchOptional')">
-            <el-input
-              v-model="form.branch"
-              :placeholder="t('projectsView.phBranchOptional')"
+      <template #header="{ titleId, titleClass }">
+        <div class="dialog-head">
+          <div class="dialog-head-main">
+            <span :id="titleId" :class="titleClass" class="dialog-title">
+              {{ editingId ? t('projectsView.editTitle') : t('projectsView.addTitle') }}
+            </span>
+            <el-color-picker
+              v-model="form.color"
+              class="accent-picker"
+              :aria-label="t('projectsView.formAccentLabel')"
             />
-          </el-form-item>
-        </template>
-
-        <el-form-item :label="t('projectsView.formLanguage')">
-          <el-select v-model="form.language" class="full" @change="onLanguageChange">
-            <el-option
-              v-for="lang in languageOptions"
-              :key="lang"
-              :value="lang"
-              :label="t(`projectsView.language_${lang}`)"
-            />
-          </el-select>
-          <div class="field-hint muted">{{ t('projectsView.languageHint') }}</div>
-        </el-form-item>
-
-        <el-form-item v-if="form.language === 'go'" :label="t('projectsView.formKind')">
-          <el-radio-group v-model="form.kind">
-            <el-radio-button value="">{{ t('projectsView.kindGo') }}</el-radio-button>
-            <el-radio-button value="wails">{{ t('projectsView.kindWails') }}</el-radio-button>
-          </el-radio-group>
-          <div class="field-hint muted">{{ t('projectsView.wailsNote') }}</div>
-        </el-form-item>
-
-        <el-form-item :label="t('projectsView.formAnalyzers')">
-          <el-select
-            v-model="form.analyzers"
-            multiple
-            :placeholder="t('projectsView.phAnalyzers')"
-            class="full"
+          </div>
+          <button
+            type="button"
+            class="dialog-close"
+            :aria-label="t('common.close')"
+            @click="dialogOpen = false"
           >
-            <el-option
-              v-for="analyzer in languageAnalyzers"
-              :key="analyzer.name"
-              :value="analyzer.name"
-              :label="analyzer.name"
-              :disabled="!analyzer.ready"
-            >
-              <span class="option">
-                <span>{{ analyzer.name }}</span>
-                <span v-if="!analyzer.ready" class="muted option-note">
-                  {{ t('projectsView.needsTools', { tools: (analyzer.missingTools ?? []).join(', ') }) }}
-                </span>
-                <span v-else class="muted option-note">{{ analyzer.category }}</span>
-              </span>
-            </el-option>
-          </el-select>
-          <div class="field-hint muted">{{ t('projectsView.hintAnalyzers') }}</div>
-        </el-form-item>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </template>
 
-        <el-form-item :label="t('projectsView.formAccent')">
-          <el-color-picker v-model="form.color" />
-        </el-form-item>
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+        <div class="steps">
+          <div class="step" :class="{ on: step === 1, done: step > 1 }">
+            <span class="step-num">1</span>{{ t('projectsView.stepSource') }}
+          </div>
+          <div class="step" :class="{ on: step === 2 }">
+            <span class="step-num">2</span>{{ t('projectsView.stepStack') }}
+          </div>
+        </div>
+
+        <div v-show="step === 1" class="pane" :key="'a' + step">
+          <div class="section-head">
+            <span class="section-title">{{ t('projectsView.sectionBasic') }}</span>
+            <span class="section-note">{{ t('projectsView.sectionBasicNote') }}</span>
+          </div>
+
+          <el-form-item :label="t('projectsView.formName')" prop="name">
+            <el-input v-model="form.name" :placeholder="t('projectsView.phName')" />
+          </el-form-item>
+
+          <el-form-item :label="t('projectsView.formDescription')">
+            <el-input
+              v-model="form.description"
+              type="textarea"
+              :rows="2"
+              :placeholder="t('projectsView.phOptional')"
+            />
+          </el-form-item>
+
+          <div class="section-head">
+            <span class="section-title">{{ t('projectsView.stepSource') }}</span>
+            <span class="section-note">{{ t('projectsView.sectionSourceNote') }}</span>
+          </div>
+
+          <el-form-item>
+            <el-radio-group v-model="form.sourceType" @change="onSourceChange">
+              <el-radio-button value="local">{{ t('projectsView.sourceLocal') }}</el-radio-button>
+              <el-radio-button value="repo">{{ t('projectsView.sourceRepo') }}</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item
+            v-if="form.sourceType === 'local'"
+            :label="t('projectsView.formLocalPath')"
+            prop="localPath"
+          >
+            <el-input v-model="form.localPath" :placeholder="t('projectsView.phLocalPath')" />
+            <div class="field-hint muted">{{ t('projectsView.hintLocalPath') }}</div>
+          </el-form-item>
+
+          <template v-else>
+            <el-form-item :label="t('projectsView.formRepoUrl')" prop="repoUrl">
+              <el-input v-model="form.repoUrl" :placeholder="t('projectsView.phRepoUrl')" />
+              <div class="field-hint muted">{{ t('projectsView.hintRepoUrl') }}</div>
+            </el-form-item>
+
+            <el-form-item :label="t('projectsView.formBranchOptional')">
+              <el-input
+                v-model="form.branch"
+                :placeholder="t('projectsView.phBranchOptional')"
+              />
+            </el-form-item>
+          </template>
+        </div>
+
+        <div v-show="step === 2" class="pane" :key="'b' + step">
+          <div class="section-head">
+            <span class="section-title">{{ t('projectsView.formLanguage') }}</span>
+            <span class="section-note">{{ t('projectsView.sectionLanguageNote') }}</span>
+          </div>
+
+          <el-form-item>
+            <el-select v-model="form.language" class="full" @change="onLanguageChange">
+              <el-option
+                v-for="lang in languageOptions"
+                :key="lang"
+                :value="lang"
+                :label="t(`projectsView.language_${lang}`)"
+              />
+            </el-select>
+          </el-form-item>
+
+          <transition name="collapse">
+            <el-form-item v-if="form.language === 'go'" :label="t('projectsView.formKind')">
+              <div
+                ref="kindGroup"
+                class="choice-group"
+                role="radiogroup"
+                @keydown.up.prevent="stepKind(-1)"
+                @keydown.down.prevent="stepKind(1)"
+              >
+                <div
+                  v-for="option in kindOptions"
+                  :key="option.value"
+                  class="choice"
+                  :class="{ on: form.kind === option.value }"
+                  role="radio"
+                  :aria-checked="form.kind === option.value"
+                  :tabindex="form.kind === option.value ? 0 : -1"
+                  @click="form.kind = option.value"
+                  @keydown.enter="form.kind = option.value"
+                  @keydown.space.prevent="form.kind = option.value"
+                >
+                  <span class="choice-radio" />
+                  <div class="choice-body">
+                    <div class="choice-title">{{ t(`projectsView.${option.title}`) }}</div>
+                    <div class="choice-sub">{{ t(`projectsView.${option.note}`) }}</div>
+                  </div>
+                </div>
+              </div>
+            </el-form-item>
+          </transition>
+
+          <div class="section-head">
+            <span class="section-title">{{ t('projectsView.formAnalyzers') }}</span>
+            <span class="section-note">{{ t('projectsView.hintAnalyzers') }}</span>
+          </div>
+
+          <el-form-item>
+            <el-select
+              v-model="form.analyzers"
+              multiple
+              :placeholder="t('projectsView.phAnalyzers')"
+              class="full"
+            >
+              <el-option
+                v-for="analyzer in languageAnalyzers"
+                :key="analyzer.name"
+                :value="analyzer.name"
+                :label="analyzer.name"
+                :disabled="!analyzer.ready"
+              >
+                <span class="option">
+                  <span>{{ analyzer.name }}</span>
+                  <span v-if="!analyzer.ready" class="muted option-note">
+                    {{ t('projectsView.needsTools', { tools: (analyzer.missingTools ?? []).join(', ') }) }}
+                  </span>
+                  <span v-else class="muted option-note">{{ analyzer.category }}</span>
+                </span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+        </div>
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="save">
+        <el-button v-if="step === 1" @click="dialogOpen = false">{{ t('common.cancel') }}</el-button>
+        <el-button v-else @click="step = 1">{{ t('projectsView.prevStep') }}</el-button>
+        <el-button v-if="step === 1" type="primary" @click="goStep2">
+          {{ t('projectsView.nextStep') }}
+        </el-button>
+        <el-button v-else type="primary" :loading="saving" @click="save">
           {{ editingId ? t('common.save') : t('projectsView.addProject') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="confirmOpen"
+      width="420px"
+      class="confirm-dialog"
+      :close-on-click-modal="false"
+      @closed="settleConfirm(false)"
+    >
+      <template #header="{ titleId, titleClass }">
+        <div class="dialog-head">
+          <span :id="titleId" :class="titleClass" class="dialog-title">{{ confirmTitle }}</span>
+          <button
+            type="button"
+            class="dialog-close"
+            :aria-label="t('common.close')"
+            @click="settleConfirm(false)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </template>
+
+      <aside class="confirm-notice">
+        <span class="confirm-notice-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="15" height="15">
+            <path d="M8 1.8 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+            <path d="M8 6.2v3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <circle cx="8" cy="11.7" r="0.95" fill="currentColor" />
+          </svg>
+        </span>
+        <span class="confirm-notice-text">{{ t('projectsView.deleteWarning') }}</span>
+      </aside>
+
+      <p class="confirm-body">{{ confirmBody }}</p>
+
+      <div v-if="confirmWord" class="confirm-word">
+        <el-input
+          v-model="confirmTyped"
+          :placeholder="confirmWord"
+          @keyup.enter="confirmTyped === confirmWord && settleConfirm(true)"
+        />
+        <div class="field-hint muted">
+          {{ t('projectsView.deleteManyConfirmError', { word: confirmWord }) }}
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="settleConfirm(false)">{{ t('common.cancel') }}</el-button>
+        <el-button
+          type="primary"
+          :disabled="!!confirmWord && confirmTyped !== confirmWord"
+          @click="settleConfirm(true)"
+        >
+          {{ t('common.delete') }}
         </el-button>
       </template>
     </el-dialog>
@@ -719,7 +884,6 @@ onMounted(load)
   gap: var(--s-md);
 }
 
-/* 页头自带下边距，这里不要再叠一层，外层 .projects 的 gap 负责间距 */
 .head .page-head {
   margin-bottom: 0;
 }
@@ -763,9 +927,6 @@ onMounted(load)
   font-weight: 600;
 }
 
-/* 名字和描述一起占满名字列，描述用省略号收尾。
-   min-width: 0 是关键：flex/grid 子项默认 min-width: auto，
-   长描述会把列撑宽、把表格顶出容器，横向滚动条就是这么来的 */
 .name-text {
   min-width: 0;
 }
@@ -800,8 +961,9 @@ onMounted(load)
 }
 
 .field-hint {
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 7px;
 }
 
 .option {
@@ -813,6 +975,348 @@ onMounted(load)
 
 .option-note {
   font-size: 11px;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.section-title {
+  flex: none;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 640;
+  color: var(--text);
+}
+
+.section-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.pane {
+  animation: pane-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.steps {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 20px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.collapse-enter-active,
+.collapse-leave-active {
+  overflow: hidden;
+  transition:
+    max-height 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    margin 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.16s var(--ease-out);
+}
+
+.collapse-enter-from,
+.collapse-leave-to {
+  max-height: 0 !important;
+  margin-bottom: 0 !important;
+  opacity: 0;
+}
+
+.collapse-enter-to,
+.collapse-leave-from {
+  max-height: 260px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-soft);
+  transition: color 0.15s var(--ease-out);
+}
+
+.step.on {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.step.done {
+  color: var(--text-muted);
+}
+
+.step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    background 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
+}
+
+.step.on .step-num,
+.step.done .step-num {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dialog-head-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog-title {
+  line-height: 1.2;
+}
+
+.dialog-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  margin-left: auto;
+  transition:
+    background 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
+}
+
+.dialog-close:hover {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.dialog-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.confirm-notice {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--r-md);
+  background: var(--danger-bg);
+}
+
+.confirm-notice-mark {
+  flex: none;
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+.confirm-notice-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-body);
+}
+
+.confirm-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-body);
+}
+
+.confirm-word {
+  margin-top: 16px;
+}
+
+.confirm-dialog :deep(.el-dialog__body) {
+  padding: 20px 28px 0;
+}
+
+.confirm-dialog :deep(.el-dialog__footer) {
+  padding: 20px 28px 26px;
+}
+
+:deep(.el-dialog__headerbtn) {
+  display: none;
+}
+
+:deep(.el-dialog__header) {
+  padding: 26px 28px 0;
+  margin-right: 0;
+}
+
+:deep(.el-dialog__body) {
+  padding: 26px 28px;
+}
+
+:deep(.el-dialog__footer) {
+  padding: 20px 28px;
+}
+
+:deep(.el-overlay-dialog) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:deep(.el-dialog) {
+  margin-top: 0;
+  transition:
+    height 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    margin 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:deep(.el-dialog .el-form-item) {
+  --el-form-item-margin-bottom: 16px;
+}
+
+:deep(.el-dialog .el-form-item__label) {
+  margin-bottom: 8px;
+  line-height: 1.4;
+  height: auto;
+}
+
+:deep(.el-dialog .el-input__wrapper),
+:deep(.el-dialog .el-select__wrapper) {
+  min-height: 42px;
+  padding: 0 13px;
+  border-radius: var(--r-sm);
+}
+
+:deep(.el-dialog .el-input__inner) {
+  font-size: 14px;
+}
+
+:deep(.el-dialog .el-textarea__inner) {
+  min-height: 72px;
+  padding: 11px 13px;
+  border-radius: var(--r-sm);
+  font-size: 14px;
+}
+
+:deep(.el-dialog .el-button) {
+  height: 40px;
+  padding: 0 24px;
+  border-radius: var(--r-pill);
+}
+
+.accent-picker {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  align-self: center;
+}
+
+:deep(.accent-picker .el-color-picker__trigger) {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border-color: var(--card-line);
+}
+
+:deep(.accent-picker .el-color-picker__color) {
+  border-radius: 50%;
+  border: 0;
+}
+
+:deep(.accent-picker .el-color-picker__color-inner) {
+  border-radius: 50%;
+}
+
+.choice-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--card-line);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition:
+    border-color 0.15s var(--ease-out),
+    background 0.15s var(--ease-out);
+}
+
+.choice-group .choice:last-child {
+  margin-bottom: 0;
+}
+
+.choice:hover {
+  border-color: var(--text);
+}
+
+.choice.on {
+  border-color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.choice-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  flex: none;
+  transition: border-color 0.15s var(--ease-out);
+}
+
+.choice.on .choice-radio {
+  border-color: var(--text);
+  border-width: 4px;
+}
+
+.choice-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.choice-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.choice-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 .actions {

@@ -237,7 +237,7 @@ onMounted(load)
           }}
         </p>
       </div>
-      <el-button type="primary" :icon="'Plus'" @click="openCreate">
+      <el-button type="primary" class="soda" :icon="'Plus'" @click="openCreate">
         {{ t('rulesView.newRule') }}
       </el-button>
     </div>

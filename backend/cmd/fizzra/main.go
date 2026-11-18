@@ -325,9 +325,6 @@ func bootstrap(cfg *config.Config, log *slog.Logger) (*App, error) {
 //   - 内置定义，模式、路径、排除项和严重级别
 //   - fizzra.yaml，可覆盖上述任一字段
 //   - 网页界面，可切换启用状态并调整严重级别
-//
-// 中间那层是关键，没有它仓库就无法收窄内置规则的作用域，比如把 no-panic 排除掉
-// 一个确实会在启动时 panic 的文件
 func seedRules(data store.Data, cfg *config.Config, log *slog.Logger) error {
 	builtins := rule.BuiltinRulesAsModels()
 
@@ -412,7 +409,7 @@ func applyConfigRule(data store.Data, rc config.RuleConfig, log *slog.Logger) er
 		}
 		return nil
 	}
-	if err != store.ErrNotFound {
+	if !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("look up rule %s: %w", rc.Name, err)
 	}
 
@@ -494,9 +491,8 @@ func cmdServe(app *App, cfg *config.Config, args []string) int {
 		Addr:              addr,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
-		// 写超时给得宽松，大项目的报告生成要花些时间，而客户端通常是本地浏览器
-		WriteTimeout: 5 * time.Minute,
-		IdleTimeout:  120 * time.Second,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
