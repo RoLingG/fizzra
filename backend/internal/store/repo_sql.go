@@ -204,15 +204,7 @@ func (r *analysisRepo) DeleteByProject(projectID string) error {
 
 // Stats 汇总成功的分析记录
 func (r *analysisRepo) Stats(projectID string) (AnalysisStats, error) {
-	type row struct {
-		Runs       int
-		AvgScore   float64
-		BestScore  float64
-		WorstScore float64
-		PassedRuns int
-		FailedRuns int
-	}
-	var agg row
+	var agg AnalysisStats
 
 	q := r.db.Model(&model.Analysis{}).
 		Select(`count(*) AS runs,
@@ -230,14 +222,7 @@ func (r *analysisRepo) Stats(projectID string) (AnalysisStats, error) {
 		return AnalysisStats{}, translateError(err)
 	}
 
-	return AnalysisStats{
-		Runs:       agg.Runs,
-		AvgScore:   agg.AvgScore,
-		BestScore:  agg.BestScore,
-		WorstScore: agg.WorstScore,
-		PassedRuns: agg.PassedRuns,
-		FailedRuns: agg.FailedRuns,
-	}, nil
+	return agg, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -376,13 +361,7 @@ func (r *issueRepo) CountByAnalyzer(analysisID string) (map[string]int, error) {
 }
 
 func (r *issueRepo) CountByRule(analysisID string, limit int) ([]RuleStat, error) {
-	type row struct {
-		Rule     string
-		Analyzer string
-		Severity string
-		Count    int
-	}
-	var rows []row
+	var out []RuleStat
 	q := r.db.Model(&model.Issue{}).
 		Select("rule, analyzer, severity, count(*) as count").
 		Where("analysis = ?", analysisID).
@@ -391,14 +370,10 @@ func (r *issueRepo) CountByRule(analysisID string, limit int) ([]RuleStat, error
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
-	if err := q.Scan(&rows).Error; err != nil {
+	if err := q.Scan(&out).Error; err != nil {
 		return nil, translateError(err)
 	}
 
-	out := make([]RuleStat, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, RuleStat{Rule: r.Rule, Analyzer: r.Analyzer, Severity: r.Severity, Count: r.Count})
-	}
 	return out, nil
 }
 
@@ -420,7 +395,7 @@ func (r *issueRepo) Fingerprints(analysisID string) (map[string]struct{}, error)
 // FingerprintsByProject 返回本项目近期成功分析中记录过的所有问题指纹
 // 它回答的是「我们在记忆范围内见过这个发现吗」，而不是「它和上一次扫描不同吗」。
 // 一个问题出现、被修好、之后又复现，会被报成不是新增，因为它在这个窗口内被见过。
-// 窗口有界，上千次运行的项目上查询仍然便宜，比 limit 次分析更早的发现会重新算作新增
+// 窗口有界，上千次运行的项目上查询仍然高效，比 limit 次分析更早的发现会重新算作新增
 func (r *issueRepo) FingerprintsByProject(projectID string, limit int) (map[string]struct{}, error) {
 	var ids []string
 	err := r.db.Model(&model.Analysis{}).

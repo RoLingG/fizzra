@@ -6,13 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/rolingg/fizzra/backend/internal/config"
 	"github.com/rolingg/fizzra/backend/internal/model"
 	"github.com/rolingg/fizzra/backend/internal/quality"
 	"github.com/rolingg/fizzra/backend/internal/report"
@@ -433,7 +433,7 @@ func triggerFor(opts cliOptions) string {
 // fizzra scan
 // ---------------------------------------------------------------------------
 
-func cmdScan(app *App, cfg *config.Config, args []string) int {
+func cmdScan(app *App, args []string) int {
 	opts, err := parseCommonFlags(args)
 	if err != nil {
 		if errors.Is(err, errHelp) {
@@ -459,13 +459,21 @@ func cmdScan(app *App, cfg *config.Config, args []string) int {
 		return 1
 	}
 
+	target := reportTarget{
+		App:      app,
+		Project:  project,
+		Analysis: analysis,
+		Issues:   issues,
+		Options:  opts,
+	}
+
 	switch opts.Format {
 	case "json":
-		return emitJSON(app, project, analysis, issues, opts)
+		return target.json()
 	case "html":
-		return emitHTML(app, project, analysis, issues, opts)
+		return target.html()
 	case "sarif":
-		return emitSARIF(app, project, analysis, issues, opts)
+		return target.sarif()
 	case "text", "":
 		printScanSummary(project, analysis, issues, opts.Quiet)
 	default:
@@ -650,11 +658,11 @@ func loadIssues(app *App, analysisID string) ([]model.Issue, error) {
 // fizzra ci
 // ---------------------------------------------------------------------------
 
-func cmdCI(app *App, cfg *config.Config, args []string) int {
+func cmdCI(app *App, args []string) int {
 	// 在通用解析器看到之前，先把与门禁相关的参数摘出来
 	var ciArgs []string
 	ci := ciConfig{}
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		switch args[i] {
 		case "--fail-on-critical":
 			ci.FailOnCritical = true
@@ -709,17 +717,24 @@ func cmdCI(app *App, cfg *config.Config, args []string) int {
 	}
 
 	// 先输出机器可读的产物，这样只看文件的 CI 系统即使下面门禁失败也仍能拿到它
+	target := reportTarget{
+		App:      app,
+		Project:  project,
+		Analysis: analysis,
+		Issues:   issues,
+		Options:  opts,
+	}
 	switch opts.Format {
 	case "json":
-		if code := emitJSON(app, project, analysis, issues, opts); code != 0 {
+		if code := target.json(); code != 0 {
 			return code
 		}
 	case "html":
-		if code := emitHTML(app, project, analysis, issues, opts); code != 0 {
+		if code := target.html(); code != 0 {
 			return code
 		}
 	case "sarif":
-		if code := emitSARIF(app, project, analysis, issues, opts); code != 0 {
+		if code := target.sarif(); code != 0 {
 			return code
 		}
 	}
@@ -732,7 +747,12 @@ func cmdCI(app *App, cfg *config.Config, args []string) int {
 	}
 
 	// 在存储的门禁之上应用命令行覆盖
-	gateResult := evaluateCIGate(app, project, analysis, issues, opts, ci)
+	gateResult := app.evaluateCIGate(ciGateInput{
+		Project:  project,
+		Analysis: analysis,
+		Issues:   issues,
+		Options:  opts,
+	})
 
 	// 不完整的扫描能否决通过，无论重算后的门禁怎么说
 	//
@@ -847,9 +867,17 @@ type ciConfig struct {
 	PrintProject bool
 }
 
+// ciGateInput 是一次门禁重算要用的数据
+type ciGateInput struct {
+	Project  *model.Project
+	Analysis *model.Analysis
+	Issues   []model.Issue
+	Options  cliOptions
+}
+
 // evaluateCIGate 把存储的门禁与命令行覆盖合到一起
-func evaluateCIGate(app *App, project *model.Project, analysis *model.Analysis, issues []model.Issue, opts cliOptions, ci ciConfig) quality.GateResult {
-	gate, err := app.Svc.GetGate(context.Background(), project.ID)
+func (a *App) evaluateCIGate(in ciGateInput) quality.GateResult {
+	gate, err := a.Svc.GetGate(context.Background(), in.Project.ID)
 	if err != nil {
 		def := quality.DefaultGate()
 		gate = &model.QualityGate{
@@ -865,11 +893,11 @@ func evaluateCIGate(app *App, project *model.Project, analysis *model.Analysis, 
 
 	// 命令行覆盖优先于存储的配置
 	// CI 常常想要比交互式默认更严格的规则，又不想去改共享设置
-	if opts.hasMinScore {
-		qGate.MinScore = opts.MinScore
+	if in.Options.hasMinScore {
+		qGate.MinScore = in.Options.MinScore
 	}
-	if len(opts.FailOn) > 0 {
-		applied, err := applyFailOn(qGate, opts.FailOn)
+	if len(in.Options.FailOn) > 0 {
+		applied, err := applyFailOn(qGate, in.Options.FailOn)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return quality.GateResult{
@@ -882,9 +910,9 @@ func evaluateCIGate(app *App, project *model.Project, analysis *model.Analysis, 
 	}
 
 	input := quality.Input{
-		Issues:  issues,
-		Metrics: analysis.Metrics,
-		Loc:     analysis.Metrics.CodeLines,
+		Issues:  in.Issues,
+		Metrics: in.Analysis.Metrics,
+		Loc:     in.Analysis.Metrics.CodeLines,
 	}
 	score := quality.Score(input, quality.DefaultWeights(), quality.DefaultThresholds())
 	return quality.Evaluate(qGate, score, input)
@@ -952,7 +980,7 @@ Examples:
 // fizzra report
 // ---------------------------------------------------------------------------
 
-func cmdReport(app *App, cfg *config.Config, args []string) int {
+func cmdReport(app *App, args []string) int {
 	opts, err := parseCommonFlags(args)
 	if err != nil {
 		if errors.Is(err, errHelp) {
@@ -976,13 +1004,20 @@ func cmdReport(app *App, cfg *config.Config, args []string) int {
 		return 1
 	}
 
+	target := reportTarget{
+		App:      app,
+		Project:  project,
+		Analysis: analysis,
+		Issues:   issues,
+		Options:  opts,
+	}
 	switch opts.Format {
 	case "json":
-		return emitJSON(app, project, analysis, issues, opts)
+		return target.json()
 	case "html":
-		return emitHTML(app, project, analysis, issues, opts)
+		return target.html()
 	case "sarif":
-		return emitSARIF(app, project, analysis, issues, opts)
+		return target.sarif()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown format %q (use html, json or sarif)\n", opts.Format)
 		return 2
@@ -1040,113 +1075,94 @@ func resolveReportTarget(ctx context.Context, app *App, opts cliOptions) (*model
 // 输出器
 // ---------------------------------------------------------------------------
 
-// buildReport 组装报告的载荷
-//
-// 组装逻辑在 service 里，因为面板也要导出同一份东西。这里只负责把已经取到手的
-// issues 交给它，省掉一次重复查询
-func buildReport(app *App, project *model.Project, analysis *model.Analysis, issues []model.Issue) (report.Report, error) {
-	rep, err := app.Svc.BuildReport(context.Background(), project.ID, analysis.ID)
+// reportTarget 是一次报告导出要用的数据
+type reportTarget struct {
+	App      *App
+	Project  *model.Project
+	Analysis *model.Analysis
+	Issues   []model.Issue
+	Options  cliOptions
+}
+
+// build 组装报告的载荷
+func (t reportTarget) build() (report.Report, error) {
+	rep, err := t.App.Svc.BuildReport(context.Background(), t.Project.ID, t.Analysis.ID)
 	if err != nil {
 		return report.Report{}, err
 	}
-	// 命令行已经用 loadIssues 取过一遍，并可能套了 --severity 之类的过滤
-	// 以调用方手上的那份为准，否则过滤参数会被静默忽略
-	rep.Issues = issues
-	rep.Stats = report.BuildStats(issues)
+	rep.Issues = t.Issues
+	rep.Stats = report.BuildStats(t.Issues)
 	return *rep, nil
 }
 
 // outputWriter 返回报告的目标位置，会遵循 --output
-func outputWriter(opts cliOptions) (interface{ Write([]byte) (int, error) }, func() error, error) {
-	if opts.Output == "" {
+func (t reportTarget) outputWriter() (io.Writer, func() error, error) {
+	if t.Options.Output == "" {
 		return os.Stdout, func() error { return nil }, nil
 	}
-	if dir := filepath.Dir(opts.Output); dir != "." && dir != "" {
+	if dir := filepath.Dir(t.Options.Output); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, nil, fmt.Errorf("create output directory: %w", err)
 		}
 	}
-	f, err := os.Create(opts.Output)
+	f, err := os.Create(t.Options.Output)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create %s: %w", opts.Output, err)
+		return nil, nil, fmt.Errorf("create %s: %w", t.Options.Output, err)
 	}
 	return f, f.Close, nil
 }
 
-func emitJSON(app *App, project *model.Project, analysis *model.Analysis, issues []model.Issue, opts cliOptions) int {
-	w, closeFn, err := outputWriter(opts)
+// emit 将报告输出到 --output 或 stdout
+func (t reportTarget) emit(label string, write func(w io.Writer, rep report.Report) error) int {
+	w, closeFn, err := t.outputWriter()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	defer closeFn()
+	defer func() {
+		if err := closeFn(); err != nil {
+			fmt.Fprintf(os.Stderr, "close output: %v\n", err)
+		}
+	}()
 
-	rep, err := buildReport(app, project, analysis, issues)
+	rep, err := t.build()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := report.WriteJSON(w, rep); err != nil {
-		fmt.Fprintf(os.Stderr, "write json report: %v\n", err)
+	if err := write(w, rep); err != nil {
+		fmt.Fprintf(os.Stderr, "write %s report: %v\n", strings.ToLower(label), err)
 		return 1
 	}
-	if opts.Output != "" && !opts.Quiet {
-		fmt.Fprintf(os.Stderr, "JSON report written to %s\n", opts.Output)
+	if t.Options.Output != "" && !t.Options.Quiet {
+		fmt.Fprintf(os.Stderr, "%s report written to %s\n", label, t.Options.Output)
 	}
 	return 0
 }
 
-func emitHTML(app *App, project *model.Project, analysis *model.Analysis, issues []model.Issue, opts cliOptions) int {
-	w, closeFn, err := outputWriter(opts)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
-	defer closeFn()
-
-	rep, err := buildReport(app, project, analysis, issues)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
-	if err := report.WriteHTML(w, rep, opts.Lang); err != nil {
-		fmt.Fprintf(os.Stderr, "write html report: %v\n", err)
-		return 1
-	}
-	if opts.Output != "" && !opts.Quiet {
-		fmt.Fprintf(os.Stderr, "HTML report written to %s\n", opts.Output)
-	}
-	return 0
+func (t reportTarget) json() int {
+	return t.emit("JSON", func(w io.Writer, rep report.Report) error {
+		return report.WriteJSON(w, rep)
+	})
 }
 
-func emitSARIF(app *App, project *model.Project, analysis *model.Analysis, issues []model.Issue, opts cliOptions) int {
-	w, closeFn, err := outputWriter(opts)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
-	defer closeFn()
+func (t reportTarget) html() int {
+	return t.emit("HTML", func(w io.Writer, rep report.Report) error {
+		return report.WriteHTML(w, rep, t.Options.Lang)
+	})
+}
 
-	rep, err := buildReport(app, project, analysis, issues)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
-	if err := report.WriteSARIF(w, rep); err != nil {
-		fmt.Fprintf(os.Stderr, "write sarif report: %v\n", err)
-		return 1
-	}
-	if opts.Output != "" && !opts.Quiet {
-		fmt.Fprintf(os.Stderr, "SARIF report written to %s\n", opts.Output)
-	}
-	return 0
+func (t reportTarget) sarif() int {
+	return t.emit("SARIF", func(w io.Writer, rep report.Report) error {
+		return report.WriteSARIF(w, rep)
+	})
 }
 
 // ---------------------------------------------------------------------------
 // fizzra projects / analyzers / rules
 // ---------------------------------------------------------------------------
 
-func cmdProjects(app *App, cfg *config.Config, args []string) int {
+func cmdProjects(app *App, args []string) int {
 	if hasHelp(args) {
 		fmt.Println(`Usage: fizzra projects
 
@@ -1182,7 +1198,7 @@ Lists every registered project with its latest score.`)
 	return 0
 }
 
-func cmdAnalyzers(app *App, cfg *config.Config, args []string) int {
+func cmdAnalyzers(app *App, args []string) int {
 	if hasHelp(args) {
 		fmt.Println(`Usage: fizzra analyzers
 
@@ -1273,7 +1289,7 @@ func installPath(tool string) string {
 	}
 }
 
-func cmdRules(app *App, cfg *config.Config, args []string) int {
+func cmdRules(app *App, args []string) int {
 	// `--help` 必须在解析子命令之前就回应。它以横杠开头，所以下面那个「这是子命令名
 	// 吗」的判断会跳过它，转而跑默认的 list，结果要帮助却静默产出了一份规则列表
 	if hasHelp(args) {
@@ -1339,9 +1355,12 @@ func cmdRules(app *App, cfg *config.Config, args []string) int {
 		}
 		enc := yaml.NewEncoder(os.Stdout)
 		enc.SetIndent(2)
-		defer enc.Close()
 		if err := enc.Encode(out); err != nil {
 			fmt.Fprintf(os.Stderr, "encode rules: %v\n", err)
+			return 1
+		}
+		if err := enc.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close encoder: %v\n", err)
 			return 1
 		}
 		return 0

@@ -66,10 +66,12 @@ func (h *Handler) streamEvents(c *gin.Context) {
 			if err != nil {
 				continue
 			}
-			c.Writer.WriteString("event: scan\n")
-			c.Writer.WriteString("data: ")
-			c.Writer.Write(payload)
-			c.Writer.WriteString("\n\n")
+			// 客户端随时可能断开，写失败是预期状态而不是错误
+			// 下一轮 select 会从 Done 分支退出，逐处检查只会淹没真正的问题
+			c.Writer.WriteString("event: scan\n") //nolint:errcheck
+			c.Writer.WriteString("data: ")        //nolint:errcheck
+			c.Writer.Write(payload)               //nolint:errcheck
+			c.Writer.WriteString("\n\n")          //nolint:errcheck
 			c.Writer.Flush()
 		}
 	}

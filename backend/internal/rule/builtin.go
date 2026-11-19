@@ -42,14 +42,9 @@ var goGeneratedSkip = []string{
 // 它排除测试文件。测试套件合法地做生产代码不该做的事，故意 panic 走 recover 路径、
 // 构造注入载荷、硬编码示例凭据、在初始化里调 context.Background()。规则在这些地方
 // 触发，找到的不是 bug 而是测试，误报一多只会教人彻底忽略这个工具
-//
-// 少数在测试里也确实有意义的规则（比如未处理的 TODO）改用 goTestIncluded
 func goExclude() []string {
 	return append(append([]string{}, goGeneratedSkip...), "**/*_test.go")
 }
-
-// goTestIncluded 是同样适用于测试代码的规则的作用域
-func goTestIncluded() []string { return goGeneratedSkip }
 
 // BuiltinRules 是随发布一起提供的规则集
 //

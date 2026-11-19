@@ -274,7 +274,7 @@ const (
 // Context 把宿主服务传入 Analyze
 type Context struct {
 	// Context 是本次分析的取消与超时作用域
-	context.Context //nolint:containedctx // 有意为之：整个结构体贯穿所有分析器
+	context.Context //nolint:containedctx
 
 	// ProjectPath 是仓库根目录的绝对路径
 	ProjectPath string

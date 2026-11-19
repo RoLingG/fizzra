@@ -26,9 +26,10 @@ type RouterOptions struct {
 //	/api/v1/...                 JSON 接口
 //	/                           单页应用，或一段说明用的占位页
 func NewRouter(h *Handler, opts RouterOptions) *gin.Engine {
-	if opts.Config.Server.Mode == "release" {
+	switch opts.Config.Server.Mode {
+	case "release":
 		gin.SetMode(gin.ReleaseMode)
-	} else if opts.Config.Server.Mode == "test" {
+	case "test":
 		gin.SetMode(gin.TestMode)
 	}
 
@@ -132,11 +133,11 @@ func registerStatic(r *gin.Engine, staticFS fs.FS, log interface{ Info(string, .
 			return
 		}
 
-		// 资源存在就返回它，否则回落到 index.html，客户端路由（如 /projects/prj_x）
-		// 在硬刷新时才能正常工作
+		// 资源存在就返回它，否则回落到 index.html
+		// 客户端路由（如 /projects/prj_x）在硬刷新时才能正常工作
 		if path != "" {
-			if f, err := staticFS.Open(path); err == nil {
-				f.Close()
+			// 只判断存在性，实际读取交给，不必自己开关一次句柄
+			if _, err := fs.Stat(staticFS, path); err == nil {
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
 			}

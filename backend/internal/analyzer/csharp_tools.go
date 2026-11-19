@@ -105,8 +105,16 @@ func (a *RoslynatorAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) 
 		return nil, fmt.Errorf("create roslynator report file: %w", err)
 	}
 	outPath := out.Name()
-	out.Close()
-	defer os.Remove(outPath)
+	// 外部工具接下来要往这个路径写，句柄没释放干净会导致写入失败
+	if err := out.Close(); err != nil {
+		return nil, fmt.Errorf("close roslynator report file: %w", err)
+	}
+	defer func() {
+		// 删不掉只是留个临时文件，不影响本次分析的结果
+		if err := os.Remove(outPath); err != nil {
+			actx.Log.Warn("remove temp report", "path", outPath, "err", err)
+		}
+	}()
 
 	args := append([]string{
 		"analyze", project,

@@ -306,14 +306,13 @@ func WriteSARIF(w io.Writer, r Report) error {
 }
 
 // tagsFor 给出 GitHub 用来筛选结果的标签
-// 取值沿用 CodeQL 的惯例，用户从它迁过来时筛选习惯不用改，critical 额外标 security
-// 是因为 GitHub 的安全告警视图按这个标签归类
+// GitHub 的安全告警视图按 security 标签归类，因此 critical 额外标 security
 func tagsFor(issue model.Issue) []string {
 	tags := []string{"maintainability"}
-	switch {
-	case issue.Severity == model.SeverityCritical:
+	switch issue.Severity {
+	case model.SeverityCritical:
 		tags = []string{"security", "correctness"}
-	case issue.Severity == model.SeverityError:
+	case model.SeverityError:
 		tags = []string{"correctness"}
 	}
 	return tags

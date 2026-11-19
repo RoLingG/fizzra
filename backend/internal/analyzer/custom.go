@@ -34,8 +34,7 @@ func (a *CustomAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Iss
 
 // AnalyzeWithContext 是真正的入口，分析器实现 ContextAware 时框架会调用它
 func (a *CustomAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
-	// 没有已启用的规则就是没有东西可查，这不能被报成「跑过了但没发现」。否则
-	// 一个 clippy 缺失的 Rust 项目会让门禁因为该分析器什么都没做而通过
+	// 没有已启用的规则就是没有东西可查，不能被报成「跑过了但没发现」
 	if actx.Rules == nil || actx.Rules.Len() == 0 {
 		return nil, ErrNothingToCheck("no rules are enabled")
 	}

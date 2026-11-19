@@ -1003,16 +1003,6 @@ func globToRegexp(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile(b.String())
 }
 
-func normalizeGlobs(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, g := range in {
-		if g = strings.TrimSpace(toSlash(g)); g != "" {
-			out = append(out, g)
-		}
-	}
-	return out
-}
-
 func toSlash(p string) string {
 	return filepath.ToSlash(p)
 }

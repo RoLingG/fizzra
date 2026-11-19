@@ -174,7 +174,8 @@ func (f *FileSet) Read(fi FileInfo, maxBytes int64) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer fh.Close()
+		// 只读文件，关闭失败不影响已经读出的内容
+		defer func() { _ = fh.Close() }()
 		buf := make([]byte, maxBytes)
 		n, err := fh.Read(buf)
 		if err != nil && n == 0 {
@@ -204,7 +205,8 @@ func readGitignore(root string) []string {
 	if err != nil {
 		return nil
 	}
-	defer fh.Close()
+	// 只读文件，关闭失败不影响已经读出的内容
+	defer func() { _ = fh.Close() }()
 
 	var patterns []string
 	scanner := bufio.NewScanner(fh)

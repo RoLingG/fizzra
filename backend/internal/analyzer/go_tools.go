@@ -526,41 +526,6 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// golangciFailure 从 golangci-lint 的日志输出里提取致命错误
-//
-// 该工具把结构化问题作为单个 JSON 对象写到 stdout，但把自己的失败以 logrus 行
-// （`level=error msg="..."`）写到 stderr。这些行不属于问题文档，所以没有
-// 这个检查的话，一次彻底失败的扫描仍然看起来像什么都没发现，而那是相反的结论
-func golangciFailure(out []byte) string {
-	var messages []string
-
-	for _, line := range splitLines(string(out)) {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "level=error") {
-			continue
-		}
-		msg := extractLogrusMessage(line)
-		if msg == "" {
-			continue
-		}
-		// golangci-lint 给每个上下文错误加的那串噪音前缀
-		msg = strings.TrimPrefix(msg, "[linters_context] ")
-		messages = append(messages, msg)
-	}
-
-	if len(messages) == 0 {
-		return ""
-	}
-
-	// 一两条就足以说明问题，构建坏掉的项目会产生几十条一模一样的类型检查错误
-	const keep = 2
-	if len(messages) > keep {
-		return strings.Join(messages[:keep], "; ") +
-			fmt.Sprintf(" (and %d more)", len(messages)-keep)
-	}
-	return strings.Join(messages, "; ")
-}
-
 // extractLogrusMessage 从 logrus 行里取出 msg="..." 的值
 func extractLogrusMessage(line string) string {
 	const key = `msg="`

@@ -82,23 +82,14 @@ var (
 	lockDepRe = regexp.MustCompile(`^"(.+?)",?$`)
 )
 
-/*
- * ParseCargoLock reads a Cargo.lock into a graph.
- *
- * The parser is deliberately hand-rolled rather than pulled from a TOML
- * library. Cargo.lock is a generated file with a fixed, narrow shape — a flat
- * sequence of `[[package]]` tables whose values are strings and string arrays —
- * and the module already avoids adding dependencies for file formats it can
- * read in thirty lines. If Cargo's format ever grows a construct this misses,
- * the failure is a parse error rather than a wrong answer, because anything
- * unrecognised is skipped rather than guessed at.
- */
+// ParseCargoLock reads a Cargo.lock into a graph
 func ParseCargoLock(path string) (*CargoLockGraph, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	// 只读文件，关闭失败不影响已经读完的内容
+	defer func() { _ = file.Close() }()
 
 	g := &CargoLockGraph{
 		byKey:  map[string]*lockPackage{},
@@ -122,8 +113,7 @@ func ParseCargoLock(path string) (*CargoLockGraph, error) {
 	}
 
 	scanner := bufio.NewScanner(file)
-	// 锁文件的行都很短，但仍然调高缓冲上限，免得一个不寻常的（或手工生成的）
-	// 文件在 64KiB 处静默让扫描失败
+	// 调高缓冲上限，避免一个不寻常或手工生成的文件在 64KiB 处静默让扫描失败
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
@@ -192,8 +182,7 @@ func (g *CargoLockGraph) resolve(dep string) []string {
 
 // walk 按依赖顺序计算从工作区根到每个可达包的最短路径
 //
-// 从所有根同时做广度优先，所以有两条路可达的包会归给较短的那条。这对展示给读者
-// 的消息很重要，说出两跳的链路比说出五跳的有用得多
+// 从所有根同时做广度优先，所以有两条路可达的包会归给较短的那条
 func (g *CargoLockGraph) walk() {
 	type item struct {
 		key  string

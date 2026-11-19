@@ -472,11 +472,6 @@ func topLong(fns []ComplexFunction, threshold, limit int) []ComplexFunction {
 func (a *MetricsAnalyzer) detectDuplication(actx *Context) (float64, []DuplicateBlock, []Issue) {
 	const window = 12
 
-	type blockKey struct {
-		hash  string
-		lines int
-	}
-
 	// 哈希到出现位置（文件加起始行）的映射
 	occurrences := map[string][]blockOccurrence{}
 	normalizedByFile := map[string][]string{}

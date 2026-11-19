@@ -1207,13 +1207,6 @@ func defaultColor(c string) string {
 	return c
 }
 
-func defaultString(v, fallback string) string {
-	if strings.TrimSpace(v) == "" {
-		return fallback
-	}
-	return v
-}
-
 func defaultPaths(paths []string) []string {
 	if len(paths) == 0 {
 		return []string{"**/*.go"}

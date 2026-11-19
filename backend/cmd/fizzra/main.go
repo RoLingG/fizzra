@@ -91,15 +91,15 @@ func run() int {
 	}
 	defer app.Close()
 
-	return cmd.run(app, cfg, commandArgs)
+	return cmd.run(app, commandArgs)
 }
 
 // command 描述一条子命令
 type command struct {
 	// names 是它接受的写法，第一个是规范名
 	names []string
-	// run 需要已接好线的 App；为 nil 表示该命令不需要数据库
-	run func(app *App, cfg *config.Config, args []string) int
+	// run 需要已接好线的 App，为 nil 表示该命令不需要数据库
+	run func(app *App, args []string) int
 	// standalone 在 run 为 nil 时执行
 	standalone func() int
 }
@@ -443,9 +443,10 @@ func applyConfigRule(data store.Data, rc config.RuleConfig, log *slog.Logger) er
 // serve
 // ---------------------------------------------------------------------------
 
-func cmdServe(app *App, cfg *config.Config, args []string) int {
+func cmdServe(app *App, args []string) int {
+	cfg := app.Cfg
 	// 其他子命令都回应 --help，serve 也必须如此，否则索要用法帮助会转而启动
-	// 服务器，在默认端口上留下一个长期运行的进程
+	// 在默认端口上留下一个长期运行的进程
 	if hasHelp(args) {
 		fmt.Println(serveUsage)
 		return 0
