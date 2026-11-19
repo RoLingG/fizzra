@@ -18,10 +18,6 @@ import (
 //	go generate ./...   # 构建仪表盘
 //	go build ./backend/cmd/fizzra
 //
-// 用 `go generate` 而不是 Makefile，它本身就是 Go 工具链的一部分，不用额外安装，
-// Windows、macOS、Linux 上是同一条命令。npm 会自己判断前端是否已是最新，
-// `go generate` 则总是执行，发布构建里这是更安全的选择
-//
 //go:generate npm --prefix ../../../frontend ci
 //go:generate npm --prefix ../../../frontend run build
 
