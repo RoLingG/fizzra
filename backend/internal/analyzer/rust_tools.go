@@ -3,7 +3,6 @@ package analyzer
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,11 +41,7 @@ func (a *ClippyAnalyzer) InstallHint() string {
 	return "rustup component add clippy"
 }
 
-func (a *ClippyAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
-// clippyRecord 是 cargo JSON Lines 流中的一行
+// clippyRecord  cargo JSON Lines 流中的一行
 //
 // 诊断嵌在下一层，位于 message 之下，cargo 把 rustc 自己的记录包了一层，以便
 // 附上 reason 和 package_id。从顶层读这些字段会让每一行都解出空结构体，这是
@@ -59,7 +54,7 @@ type clippyRecord struct {
 	Message clippyMessage `json:"message"`
 }
 
-// clippyMessage 是 rustc 的诊断载荷
+// clippyMessage  rustc 的诊断载荷
 //
 // 格式见 doc.rust-lang.org/rustc/json.html，文档明确警告它可能新增字段和枚举
 // 值。所以这里每个字段都是可选的，未知字段一律忽略，严格解码会在工具链升级时
@@ -78,7 +73,7 @@ type clippyMessage struct {
 	} `json:"children"`
 }
 
-// clippySpan 是诊断内部的一个源码位置
+// clippySpan 诊断内部的一个源码位置
 type clippySpan struct {
 	FileName    string `json:"file_name"`
 	LineStart   int    `json:"line_start"`
@@ -437,10 +432,6 @@ func (a *RustfmtAnalyzer) InstallHint() string {
 	return "rustup component add rustfmt"
 }
 
-func (a *RustfmtAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 func (a *RustfmtAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	if _, err := actx.Runner.LookPath("cargo"); err != nil {
 		return nil, ErrToolUnavailable("cargo (rustfmt)")
@@ -521,10 +512,9 @@ func parseRustfmtDiff(out []byte, crateDir string) []Issue {
 
 // relToProject 把上报的路径转为相对项目根目录的形式
 //
-// rustfmt 打印的是绝对路径，涉及盘符时是 Windows verbatim 形式。问题列表显示的
-// 是相对项目的位置，所以扫描 Tauri 应用会报出 src-tauri/src/lib.rs 而不是一台
-// 机器特有的绝对路径，而 verbatim 前缀必须先去掉，filepath 才会把它当普通
-// 路径处理
+// 部分工具例如 rustfmt 打印的是绝对路径，涉及盘符时是 Windows verbatim 形式
+// 问题列表显示的是相对项目的位置，所以扫描 Tauri 应用会报出 src-tauri/src/lib.rs 而不是一台
+// 机器特有的绝对路径，而 verbatim 前缀必须先去掉，filepath 才会把它当普通路径处理
 func relToProject(path, fromDir string) string {
 	clean := normalizeVerbatim(path)
 	base := normalizeVerbatim(fromDir)
@@ -535,7 +525,7 @@ func relToProject(path, fromDir string) string {
 			return rel
 		}
 	}
-	// 不在 crate 目录下，就按原样上报路径，而不是什么都不报
+	// 不在 crate 目录下，就按原样上报路径
 	return filepath.ToSlash(clean)
 }
 
@@ -609,8 +599,8 @@ func (a *CargoAuditAnalyzer) InstallHint() string {
 // Options 把该分析器的开关暴露给面板
 //
 // 只有一个，且默认关闭，读者没有选择的那个依赖里的漏洞，是否该计入他的评分。
-// 默认关，因为答案通常是不该，见 engine.Run 里关于评分的说明。对想要严格口径、
-// 不管该由谁修的项目可以打开
+// 默认关，因为答案通常是不该，见 engine.Run 里关于评分的说明。
+// 对想要严格口径，不管该由谁修的项目可以打开
 func (a *CargoAuditAnalyzer) Options() []DescriptorOption {
 	return []DescriptorOption{
 		{
@@ -631,14 +621,7 @@ func (a *CargoAuditAnalyzer) Options() []DescriptorOption {
 	}
 }
 
-func (a *CargoAuditAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
-// auditReport 对应 `cargo audit --json`
-//
-// 只声明了发现问题所需的字段，真实文档里还带着完整的依赖图和通告库元数据，
-// 那些既大又用不上
+// auditReport 对应 `cargo audit --json`，只声明了发现问题所需的字段
 type auditReport struct {
 	Vulnerabilities struct {
 		Found bool         `json:"found"`
@@ -647,7 +630,7 @@ type auditReport struct {
 	} `json:"vulnerabilities"`
 }
 
-// auditEntry 是一条命中的通告
+// auditEntry 声明一条命中的通告
 type auditEntry struct {
 	Advisory struct {
 		ID            string   `json:"id"`
@@ -700,7 +683,7 @@ func (a *CargoAuditAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) 
 		if IsTimeout(err) {
 			return nil, err
 		}
-		// 退出码非零是常态：cargo-audit 就是这样表示「发现了漏洞」的
+		// 退出码非零是常态，cargo-audit 就是这样表示「发现了漏洞」
 		// 只有完全没有输出才是一次真正的失败
 		if len(out) == 0 {
 			return nil, fmt.Errorf("cargo-audit failed: %w", err)

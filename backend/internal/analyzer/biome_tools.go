@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,7 @@ import (
 //	if (x = 1)  noAssignInExpressions     -      yes
 //	constant condition                    -      yes
 //	assign to const                       -      yes
-//	no-explicit-any                      yes      yes
+//	no-explicit-any                      yes     yes
 //
 // 前三项是正确性错误，oxlint 的默认规则集不启用，Biome 的默认集启用
 
@@ -95,7 +94,7 @@ type biomeReport struct {
 	Diagnostics []biomeDiagnostic `json:"diagnostics"`
 }
 
-// biomeDiagnostic 是 diagnostics 数组中的一项
+// biomeDiagnostic  diagnostics 数组中的一项
 type biomeDiagnostic struct {
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
@@ -118,10 +117,6 @@ type biomeDiagnostic struct {
 		} `json:"end"`
 		Text string `json:"text"`
 	} `json:"advices"`
-}
-
-func (a *BiomeAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *BiomeAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
@@ -253,7 +248,7 @@ func isVuePath(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".vue")
 }
 
-// biomeInvocation 是解析好的命令加上它的前置参数
+// biomeInvocation 解析好的命令加上它的前置参数
 type biomeInvocation struct {
 	name string
 	args []string

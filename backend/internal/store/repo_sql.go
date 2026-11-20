@@ -10,7 +10,7 @@ import (
 	"github.com/rolingg/fizzra/backend/internal/model"
 )
 
-// SQLData 是基于 SQLite/GORM 的 Data 实现
+// SQLData 基于 SQLite/GORM 的 Data 实现
 type SQLData struct {
 	db *DB
 }

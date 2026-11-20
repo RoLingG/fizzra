@@ -72,7 +72,7 @@ func addStruct(out keySet, prefix string, v any) {
 	}
 }
 
-// analyzerOptionsPath 是唯一一个形状无法用结构体标签表达的配置段
+// analyzerOptionsPath 唯一一个形状无法用结构体标签表达的配置段
 const analyzerOptionsPath = "scan.analyzerOptions"
 
 // knownAnalyzerOptionKeys 把每个分析器名映射到它接受的选项键
@@ -207,7 +207,7 @@ func Validate(raw []byte) []error {
 					continue
 				}
 
-				// analyzerOptions 是唯一的开放式段落
+				// analyzerOptions 唯一的开放式段落
 				// 键是分析器名，值是该分析器声明的那些键，两者都无法表达成结构体标签。
 				// map 类型给不了表结构遍历器任何可推导的东西，于是它一个键都不接受，
 				// 把每条记录都当成未知拒绝掉，连随发布提供的 ruff 与 cargo-audit 选项也不例外。

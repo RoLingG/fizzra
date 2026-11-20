@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,10 +36,6 @@ func (a *GofmtAnalyzer) Requires() []string {
 
 func (a *GofmtAnalyzer) InstallHint() string {
 	return "Ships with the Go toolchain: install Go and put it on PATH"
-}
-
-func (a *GofmtAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *GofmtAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
@@ -114,10 +109,6 @@ func (a *GoVetAnalyzer) InstallHint() string {
 
 // vetDiag 匹配 go vet 的 `file.go:12:34: message` 输出
 var vetDiag = regexp.MustCompile(`^(.+?\.go):(\d+):(?:(\d+):)?\s*(.*)$`)
-
-func (a *GoVetAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
 
 func (a *GoVetAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	if _, err := actx.Runner.LookPath("go"); err != nil {
@@ -225,10 +216,6 @@ type golangciJSON struct {
 	} `json:"Report"`
 }
 
-func (a *GolangciAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 func (a *GolangciAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	if _, err := actx.Runner.LookPath("golangci-lint"); err != nil {
 		return nil, ErrToolUnavailable("golangci-lint")
@@ -307,7 +294,7 @@ func (a *GolangciAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 			Severity: mapGolangciSeverity(it.FromLinter, it.Severity),
 			Message:  it.Text,
 			Advice:   adviceForLinter(it.FromLinter),
-			File:     filepath.ToSlash(it.Pos.Filename),
+			File:     relToProject(it.Pos.Filename, actx.ProjectPath),
 			Line:     it.Pos.Line,
 			Column:   it.Pos.Column,
 			Code:     code,
@@ -379,10 +366,6 @@ func (a *StaticcheckAnalyzer) Requires() []string { return []string{"staticcheck
 
 // staticcheck 的 `file:line:col: message` 布局与多数 Go 工具相同
 var scDiag = regexp.MustCompile(`^(.+?\.go):(\d+):(\d+):\s*(.*)$`)
-
-func (a *StaticcheckAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
 
 func (a *StaticcheckAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	if _, err := actx.Runner.LookPath("staticcheck"); err != nil {
@@ -497,7 +480,7 @@ func ErrNothingToCheck(reason string) error {
 	return &NothingToCheckError{Reason: reason}
 }
 
-// NothingToCheckError 是「适用但没有输入」的跳过标记
+// NothingToCheckError 「适用但没有输入」的跳过标记
 type NothingToCheckError struct{ Reason string }
 
 func (e *NothingToCheckError) Error() string {
@@ -514,8 +497,7 @@ func IsNothingToCheck(err error) bool {
 }
 
 func asExitError(err error) *ExitError {
-	var ee *ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*ExitError](err); ok {
 		return ee
 	}
 	return nil
@@ -529,11 +511,11 @@ func splitLines(s string) []string {
 // extractLogrusMessage 从 logrus 行里取出 msg="..." 的值
 func extractLogrusMessage(line string) string {
 	const key = `msg="`
-	start := strings.Index(line, key)
-	if start < 0 {
+	_, after, ok := strings.Cut(line, key)
+	if !ok {
 		return ""
 	}
-	rest := line[start+len(key):]
+	rest := after
 
 	// 扫描到收尾引号，同时处理反斜杠转义
 	var b strings.Builder
@@ -577,8 +559,7 @@ func toolFailureText(err error) string {
 		return ""
 	}
 
-	var exitErr *ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*ExitError](err); ok {
 		if exitErr.Stderr != "" {
 			return collapseDiagnostic(exitErr.Stderr)
 		}
@@ -593,8 +574,8 @@ func toolFailureText(err error) string {
 
 // collapseDiagnostic 把多行的工具报告压成一行可读内容
 //
-// 构建和类型检查的失败有好几段，而摘要只有一行的位置。第一行有意义的文字会
-// 给出文件名和成因，那才是用户要处理的
+// 构建和类型检查的失败有好几段，而摘要只有一行的位置。
+// 第一行有意义的文字会给出文件名和成因，那才是用户要处理的
 func collapseDiagnostic(s string) string {
 	var parts []string
 	for _, line := range splitLines(s) {

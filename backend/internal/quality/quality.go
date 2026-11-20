@@ -21,7 +21,7 @@ type Weights struct {
 	Coverage        float64
 }
 
-// DefaultWeights 是随发布提供的配比
+// DefaultWeights 随发布提供的配比
 // 正确性和安全占主导，覆盖率权重较小，因为它经常拿不到
 func DefaultWeights() Weights {
 	return Weights{
@@ -38,11 +38,11 @@ type Thresholds struct {
 	// CriticalIssues 与 HighIssues 是安全和 bug 子分触底的计数
 	CriticalIssues int
 	HighIssues     int
-	// MaxDuplicationPercent 是让可维护性归零的重复率
+	// MaxDuplicationPercent 让可维护性归零的重复率
 	MaxDuplicationPercent float64
-	// MaxAvgComplexity 是让复杂度得分归零的平均复杂度
+	// MaxAvgComplexity 让复杂度得分归零的平均复杂度
 	MaxAvgComplexity float64
-	// TargetCoverage 是能拿满分的覆盖率百分比
+	// TargetCoverage 能拿满分的覆盖率百分比
 	TargetCoverage float64
 }
 
@@ -57,7 +57,7 @@ func DefaultThresholds() Thresholds {
 	}
 }
 
-// Input 是给一次分析评分所需的全部输入
+// Input 给一次分析评分所需的全部输入
 type Input struct {
 	Issues  []model.Issue
 	Metrics model.Metrics
@@ -65,7 +65,7 @@ type Input struct {
 	Loc int
 }
 
-// Dimension 是评分的一个组成部分
+// Dimension 评分的一个组成部分
 type Dimension struct {
 	Name   string  `json:"name"`
 	Score  float64 `json:"score"`
@@ -74,12 +74,12 @@ type Dimension struct {
 	Detail string `json:"detail"`
 }
 
-// Result 是评分完成的这次分析
+// Result 评分完成的这次分析
 type Result struct {
 	Score      float64     `json:"score"`
 	Grade      string      `json:"grade"`
 	Dimensions []Dimension `json:"dimensions"`
-	// Summary 是一句人类可读的评分说明
+	// Summary 一句人类可读的评分说明
 	Summary string `json:"summary"`
 }
 
@@ -380,7 +380,7 @@ func summarize(score float64, dims []Dimension, in Input) string {
 // 质量门禁
 // ---------------------------------------------------------------------------
 
-// Gate 是通过与否的策略
+// Gate 通过与否的策略
 type Gate struct {
 	MinScore      float64
 	MaxCritical   int
@@ -403,7 +403,7 @@ func DefaultGate() Gate {
 	}
 }
 
-// GateResult 是对门禁求值的结果
+// GateResult 对门禁求值的结果
 type GateResult struct {
 	Passed bool   `json:"passed"`
 	Status string `json:"status"`
@@ -412,7 +412,7 @@ type GateResult struct {
 	Violations []Violation `json:"violations"`
 }
 
-// Violation 是一条未满足的门禁条件
+// Violation 一条未满足的门禁条件
 type Violation struct {
 	Rule     string `json:"rule"`
 	Expected string `json:"expected"`

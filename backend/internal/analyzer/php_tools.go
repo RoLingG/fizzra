@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -108,10 +107,6 @@ type phpstanMessage struct {
 	Identifier string `json:"identifier"`
 }
 
-func (a *PhpstanAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 func (a *PhpstanAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	cmd, err := phpstanCommand(actx)
 	if err != nil {
@@ -120,7 +115,7 @@ func (a *PhpstanAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 
 	// 早于 7.4 的解释器会以 "unexpected 'bool' (T_STRING)" 退出，
 	// 那句错误指向不了真正原因，所以先确认版本，直接报版本不足
-	if err := ensurePhpVersion(actx, cmd); err != nil {
+	if err := ensurePhpVersion(actx); err != nil {
 		return nil, err
 	}
 
@@ -173,7 +168,7 @@ func (a *PhpstanAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	return issues, nil
 }
 
-// phpstanInvocation 是解析好的命令
+// phpstanInvocation 解析好的命令
 type phpstanInvocation struct {
 	name string
 	args []string
@@ -204,7 +199,7 @@ func phpInterpreter(actx *Context) (string, error) {
 	return "", ErrToolUnavailable("php")
 }
 
-// phpstanMinVersion 是 PHPStan 2.x 需要的最低 PHP 版本
+// phpstanMinVersion  PHPStan 2.x 需要的最低 PHP 版本
 // PHPStan 2.3.1 本身用了 7.4 才有的语法（typed property、箭头函数），
 // 更老的解释器会以解析错误退出，报的还不是被分析代码的问题
 const phpstanMinVersion = "7.4"
@@ -213,7 +208,7 @@ const phpstanMinVersion = "7.4"
 //
 // 只在拿得到解释器时检查，PHPStan 也可能是 PATH 上带 shebang 的独立文件，
 // 那种情况下真正的解释器由内核决定，硬报错会把一个能跑的环境挡在门外
-func ensurePhpVersion(actx *Context, cmd phpstanInvocation) error {
+func ensurePhpVersion(actx *Context) error {
 	php, err := phpInterpreter(actx)
 	if err != nil {
 		return nil
@@ -291,7 +286,7 @@ func phpstanSeverity(identifier string) Severity {
 	return SeverityError
 }
 
-// phpstanInfoPrefixes 是不指向真实缺陷的标识前缀
+// phpstanInfoPrefixes 不指向真实缺陷的标识前缀
 //
 // 不在表里的标识一律落到 error，判成风格问题会悄悄降级，
 // 判成错误只是多看一眼，后者更安全

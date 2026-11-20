@@ -31,7 +31,7 @@ var ErrConflict = store.ErrConflict
 // ErrInvalid 标记调用方输入有误，映射为 HTTP 400
 var ErrInvalid = errors.New("invalid input")
 
-// Service 是应用的门面
+// Service 应用的门面
 type Service struct {
 	Data     store.Data
 	Cfg      *config.Config
@@ -56,7 +56,7 @@ type Enqueuer interface {
 // 项目
 // ---------------------------------------------------------------------------
 
-// CreateProjectInput 是创建项目的入参
+// CreateProjectInput 创建项目的入参
 type CreateProjectInput struct {
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
@@ -459,7 +459,7 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 	return out, nil
 }
 
-// ProjectSummary 是项目加上它最近的结果
+// ProjectSummary 项目加上它最近的结果
 type ProjectSummary struct {
 	model.Project
 	// Latest 是最近一次成功的分析，用来显示分数和问题数
@@ -592,7 +592,7 @@ func (s *Service) EngineProgress(analysisID string) Progress {
 	return Progress{Percent: percent, Stage: stage}
 }
 
-// Progress 是运行中分析的实时状态
+// Progress 运行中分析的实时状态
 type Progress struct {
 	Percent int    `json:"percent"`
 	Stage   string `json:"stage"`
@@ -632,7 +632,7 @@ func (s *Service) Trend(ctx context.Context, projectID string, limit int) ([]Tre
 	return out, nil
 }
 
-// TrendPoint 是评分历史图上的一个点
+// TrendPoint 评分历史图上的一个点
 type TrendPoint struct {
 	AnalysisID string  `json:"analysisId"`
 	At         string  `json:"at"`
@@ -731,7 +731,7 @@ func (s *Service) SetIssueStatus(ctx context.Context, id, status string) (*model
 	return issue, nil
 }
 
-// IssueStats 是某次分析的问题汇总
+// IssueStats 某次分析的问题汇总
 type IssueStats struct {
 	Total      int              `json:"total"`
 	BySeverity map[string]int   `json:"bySeverity"`
@@ -853,7 +853,7 @@ func (s *Service) ListRules(ctx context.Context) ([]model.Rule, error) {
 	return s.Data.Rules().List()
 }
 
-// RuleInput 是创建或更新规则的入参
+// RuleInput 创建或更新规则的入参
 type RuleInput struct {
 	Name     string   `json:"name" binding:"required"`
 	Severity string   `json:"severity"`
@@ -1164,21 +1164,21 @@ func (s *Service) ScanPreflight(ctx context.Context, projectID string) (*ScanPre
 	return out, nil
 }
 
-// ScanPreflight 是一次扫描的启动前检查结果
+// ScanPreflight 一次扫描的启动前检查结果
 type ScanPreflight struct {
 	Project  string `json:"project"`
 	Language string `json:"language"`
-	// Analyzers 是本次会运行的分析器名字
+	// Analyzers 本次会运行的分析器名字
 	Analyzers []string `json:"analyzers"`
 	// Blocked 是应该运行、但当前跑不了的
 	Blocked []BlockedAnalyzer `json:"blocked"`
 }
 
-// BlockedAnalyzer 是一个因工具缺失而无法运行的分析器
+// BlockedAnalyzer 一个因工具缺失而无法运行的分析器
 type BlockedAnalyzer struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	// MissingTools 是具体缺哪些可执行文件
+	// MissingTools 具体缺哪些可执行文件
 	MissingTools []string `json:"missingTools"`
 	// InstallHint 由分析器自己声明，与 MissingTools 配对给出，调用方因此不必
 	// 从工具名反推命令

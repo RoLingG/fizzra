@@ -14,9 +14,9 @@ import (
 // 其余部分一致。两组取值在 service 层的映射里有断言保证相等，一旦漂移会以测试
 // 失败的形式暴露，而不是变成静默匹配不上的字符串
 const (
-	// OriginDirect 是项目自己声明的依赖
+	// OriginDirect 项目自己声明的依赖
 	OriginDirect = "direct"
-	// OriginTransitive 是只能经由另一个依赖到达的依赖
+	// OriginTransitive 只能经由另一个依赖到达的依赖
 	OriginTransitive = "transitive"
 )
 
@@ -39,7 +39,7 @@ const (
  * transitive pin, and that is what the advisories match against.
  */
 
-// lockPackage 是一个 `[[package]]` 块
+// lockPackage 一个 `[[package]]` 块
 type lockPackage struct {
 	name    string
 	version string
@@ -70,7 +70,7 @@ type CargoLockGraph struct {
 	roots []string
 }
 
-// packageKey 是一个已锁定包的标准标识
+// packageKey 一个已锁定包的标准标识
 func packageKey(name, version string) string { return name + " " + version }
 
 var (

@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,12 +37,12 @@ func (a *ClangTidyAnalyzer) ProbeCommands() [][]string {
 	return [][]string{{"clang-tidy"}, {"clang-tidy.exe"}}
 }
 
-// clangTidyChecks 是交给 clang-tidy 的检查集
+// clangTidyChecks 交给 clang-tidy 的检查集
 //
 // 默认一条都不开，必须显式指定。security-* 在探针上没产出，但保留它不增加成本
 var clangTidyChecks = "clang-analyzer-*,bugprone-*,cert-*,security-*"
 
-// clangTidySources 是参与分析的文件扩展名
+// clangTidySources 参与分析的文件扩展名
 var clangTidySources = []string{".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
 
 // clangTidyLine 匹配一条诊断
@@ -51,7 +50,7 @@ var clangTidySources = []string{".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp"
 //	path:line:col: warning: message [rule]  或  [rule1,rule2]
 var clangTidyLine = regexp.MustCompile(`^(.+?):(\d+):(\d+): (warning|error|note): (.+?)(?: \[([^\]]+)\])?$`)
 
-// clangTidyIssue 是一条解析出来的诊断
+// clangTidyIssue 一条解析出来的诊断
 type clangTidyIssue struct {
 	file     string
 	line     int
@@ -59,10 +58,6 @@ type clangTidyIssue struct {
 	severity string
 	message  string
 	rules    []string
-}
-
-func (a *ClangTidyAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *ClangTidyAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
@@ -143,7 +138,7 @@ func clangTidyStandard(ext string) string {
 // parseClangTidyOutput 解析 clang-tidy 的文本输出
 func parseClangTidyOutput(out []byte) []clangTidyIssue {
 	var issues []clangTidyIssue
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -157,7 +152,7 @@ func parseClangTidyOutput(out []byte) []clangTidyIssue {
 
 		var rules []string
 		if m[6] != "" {
-			for _, r := range strings.Split(m[6], ",") {
+			for r := range strings.SplitSeq(m[6], ",") {
 				if r = strings.TrimSpace(r); r != "" {
 					rules = append(rules, r)
 				}
@@ -175,7 +170,7 @@ func parseClangTidyOutput(out []byte) []clangTidyIssue {
 	return issues
 }
 
-// clangTidyInvocation 是解析好的命令
+// clangTidyInvocation 解析好的命令
 type clangTidyInvocation struct {
 	name string
 }

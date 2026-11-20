@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -60,10 +59,6 @@ type gosecJSON struct {
 	} `json:"GosecErrors"`
 }
 
-func (a *GosecAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 func (a *GosecAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	if _, err := actx.Runner.LookPath("gosec"); err != nil {
 		return nil, ErrToolUnavailable("gosec")
@@ -96,7 +91,9 @@ func (a *GosecAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	for _, it := range report.Issues {
 		line := parseGosecLine(it.Line)
 		col, _ := strconv.Atoi(strings.TrimSpace(it.Column))
-		rel := filepath.ToSlash(it.File)
+		// gosec 在目标以绝对路径传入时原样回填，直接上报会让 SARIF 里混进
+		// 绝对路径，GitHub 的代码扫描无法把它对应到仓库文件
+		rel := relToProject(it.File, actx.ProjectPath)
 
 		issues = append(issues, Issue{
 			Analyzer: a.Name(),
@@ -253,7 +250,7 @@ func (a *VulnerabilityAnalyzer) Options() []DescriptorOption {
 	}}
 }
 
-// vulnEntry 是 govulncheck JSON 流中的一条记录
+// vulnEntry  govulncheck JSON 流中的一条记录
 type vulnEntry struct {
 	OSV struct {
 		ID       string   `json:"id"`
@@ -285,10 +282,6 @@ type vulnEntry struct {
 	Config *struct {
 		ProtocolVersion string `json:"protocol_version"`
 	} `json:"config"`
-}
-
-func (a *VulnerabilityAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *VulnerabilityAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {

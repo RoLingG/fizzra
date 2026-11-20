@@ -1,8 +1,6 @@
 package analyzer
 
 import (
-	"context"
-
 	"github.com/rolingg/fizzra/backend/internal/model"
 )
 
@@ -28,11 +26,7 @@ func (a *CustomAnalyzer) Description() string {
 func (a *CustomAnalyzer) Category() string   { return "custom" }
 func (a *CustomAnalyzer) Requires() []string { return nil }
 
-func (a *CustomAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil // replaced by AnalyzeWithContext
-}
-
-// AnalyzeWithContext 是真正的入口，分析器实现 ContextAware 时框架会调用它
+// AnalyzeWithContext 真正的入口，分析器实现 ContextAware 时框架会调用它
 func (a *CustomAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	// 没有已启用的规则就是没有东西可查，不能被报成「跑过了但没发现」
 	if actx.Rules == nil || actx.Rules.Len() == 0 {
@@ -111,10 +105,6 @@ func (a *WailsAnalyzer) Description() string {
 func (a *WailsAnalyzer) Category() string   { return "wails" }
 func (a *WailsAnalyzer) Requires() []string { return nil }
 
-func (a *WailsAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 // AnalyzeWithContext 运行 Wails 专项检查
 func (a *WailsAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	chk := newWailsChecker(actx, a.Name())
@@ -131,8 +121,7 @@ func normalizeSeverity(s string) string {
 //
 // 引擎自己的作用域过滤与语言无关（规则声明 `paths: ['**/*.py']` 就是这个意思），
 // 但这里的文件选择写死成了 .go，所以一条 Python 规则永远看不到 Python 文件。
-// 那是规则引擎唯一还在假定宿主语言的地方，它让自定义规则在每个非 Go 项目上静默
-// 失效
+// 那是规则引擎唯一还在假定宿主语言的地方，它让自定义规则在每个非 Go 项目上静默失效
 //
 // 无法识别的语言回退到 Go，与工具其余部分一致
 func rulesFiles(actx *Context) []FileInfo {

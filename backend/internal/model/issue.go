@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Severity 是所有分析器共用的统一问题等级
+// Severity 所有分析器共用的统一问题等级
 // 外部工具用词各异，由各分析器负责映射到这四个等级，
 // 规则引擎、评分和门禁因此只需处理一套刻度
 type Severity string
@@ -92,7 +92,7 @@ func normalizeSeverity(raw string) string {
 	return strings.ToLower(raw)
 }
 
-// Issue 是每个分析器都必须产出的唯一输出格式
+// Issue 每个分析器都必须产出的唯一输出格式
 type Issue struct {
 	ID       string   `json:"id" gorm:"primaryKey;size:64"`
 	Analysis string   `json:"analysisId" gorm:"index;size:64"`
@@ -144,7 +144,7 @@ const (
 	OriginSource = ""
 	// OriginDirect 是项目自己声明的依赖，读者改动自己的清单文件就能处理
 	OriginDirect = "direct"
-	// OriginTransitive 是只能经由另一个依赖到达的依赖
+	// OriginTransitive 只能经由另一个依赖到达的依赖
 	// 读者无法直接修好它，解决办法在上游维护者手里
 	OriginTransitive = "transitive"
 )

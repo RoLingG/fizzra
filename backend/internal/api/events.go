@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// heartbeatEvery 是 SSE 保活间隔
+// heartbeatEvery  SSE 保活间隔
 //
 // 没有它，连接在服务端看来永远是活跃的空转连接。server.Shutdown 会先关空闲连接再等
 // 活跃连接自己结束，而 SSE 永不自行结束，Ctrl+C 后要等 shutdownCtx 超时才能退出。

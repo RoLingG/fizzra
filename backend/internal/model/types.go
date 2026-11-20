@@ -18,7 +18,7 @@ import (
 // StringSlice
 // ---------------------------------------------------------------------------
 
-// StringSlice 是以 JSON 数组持久化的 []string
+// StringSlice 以 JSON 数组持久化的 []string
 type StringSlice []string
 
 func (s StringSlice) Value() (driver.Value, error) {
@@ -106,9 +106,9 @@ type Metrics struct {
 	BlankLines   int `json:"blankLines"`
 	Functions    int `json:"functions"`
 
-	// AvgComplexity 是每个函数的平均圈复杂度
+	// AvgComplexity 每个函数的平均圈复杂度
 	AvgComplexity float64 `json:"avgComplexity"`
-	// MaxComplexity 是项目里最差的函数
+	// MaxComplexity 项目里最差的函数
 	MaxComplexity int `json:"maxComplexity"`
 	// ComplexFunctions 列出超过配置阈值的函数
 	ComplexFunctions []ComplexFunction `json:"complexFunctions"`
@@ -135,7 +135,7 @@ type Metrics struct {
 	LargestFiles []FileSize `json:"largestFiles"`
 }
 
-// FileSize 是逐文件大小明细中的一项
+// FileSize 逐文件大小明细中的一项
 type FileSize struct {
 	File  string `json:"file"`
 	Lines int    `json:"lines"`
@@ -155,7 +155,7 @@ type ComplexFunction struct {
 	Receiver   string `json:"receiver,omitempty"`
 }
 
-// DuplicateBlock 是一组完全相同的代码片段
+// DuplicateBlock 一组完全相同的代码片段
 type DuplicateBlock struct {
 	Lines   int      `json:"lines"`
 	Tokens  int      `json:"tokens"`

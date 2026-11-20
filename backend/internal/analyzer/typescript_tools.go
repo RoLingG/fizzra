@@ -3,7 +3,6 @@ package analyzer
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -69,7 +68,7 @@ func (a *TscAnalyzer) AvailableIn(projectPath string) bool {
 	return analyzerAvailableIn(projectPath, "vue-tsc") || analyzerAvailableIn(projectPath, "tsc")
 }
 
-// tsDiagnostic 是 `tsc --pretty false` 输出中的一行
+// tsDiagnostic  `tsc --pretty false` 输出中的一行
 //
 // 编译器没有 JSON 输出（tsc --help 只提供 --pretty），所以解析文本形式。它稳定
 // 且是机器形状的：
@@ -89,12 +88,8 @@ type tsDiagnostic struct {
 	Severity string
 }
 
-// tsconfigNames 是让类型检查有意义的那些配置文件
+// tsconfigNames 让类型检查有意义的那些配置文件
 var tsconfigNames = []string{"tsconfig.json", "jsconfig.json"}
-
-func (a *TscAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
 
 func (a *TscAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	config := findTSConfig(actx.ProjectPath)
@@ -149,7 +144,7 @@ func (a *TscAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	return issues, nil
 }
 
-// tscInvocation 是解析好的命令加上它的前置参数
+// tscInvocation 解析好的命令加上它的前置参数
 type tscInvocation struct {
 	name string
 	args []string

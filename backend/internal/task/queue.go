@@ -23,7 +23,7 @@ type Runner interface {
 	RunAnalysis(ctx context.Context, analysisID string) error
 }
 
-// Queue 是 API 层使用的队列契约
+// Queue  API 层使用的队列契约
 type Queue interface {
 	// Enqueue 把一次分析排入执行队列
 	Enqueue(analysisID string) error
@@ -35,7 +35,7 @@ type Queue interface {
 	Stop(ctx context.Context) error
 }
 
-// MemoryQueue 是进程内的有界 worker 池
+// MemoryQueue 进程内的有界 worker 池
 //
 // 任务放在带缓冲的 channel 里。缓冲满时 Enqueue 短暂阻塞后返回失败，接口据此回
 // 503 把背压传出去，而不是静默丢任务
@@ -60,15 +60,15 @@ type MemoryQueue struct {
 
 // Config 用于调整队列
 type Config struct {
-	// Workers 是并发执行的分析数
+	// Workers 并发执行的分析数
 	Workers int
-	// BufferSize 是允许排队的待处理分析数
+	// BufferSize 允许排队的待处理分析数
 	BufferSize int
 	// EnqueueTimeout 限制 Enqueue 等待空位的时长
 	EnqueueTimeout time.Duration
-	// ShutdownTimeout 是 Stop 等待进行中分析的时长
+	// ShutdownTimeout  Stop 等待进行中分析的时长
 	ShutdownTimeout time.Duration
-	// RecoverOnStart 是否重新排队上一个进程遗留在 running 状态的分析
+	// RecoverOnStart 否重新排队上一个进程遗留在 running 状态的分析
 	RecoverOnStart bool
 }
 

@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -78,10 +77,6 @@ type sbReport struct {
 	Errors struct {
 		MissingClasses []string `xml:"MissingClass"`
 	} `xml:"Errors"`
-}
-
-func (a *SpotBugsAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *SpotBugsAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
@@ -270,7 +265,7 @@ func spotsBugsTarget(projectPath string) (string, error) {
 	return "", nil
 }
 
-// spotBugsInvocation 是解析好的命令
+// spotBugsInvocation 解析好的命令
 type spotBugsInvocation struct {
 	name string
 }

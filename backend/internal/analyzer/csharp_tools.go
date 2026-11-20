@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,13 +40,13 @@ func (a *RoslynatorAnalyzer) ProbeCommands() [][]string {
 	return [][]string{{"roslynator"}, {"roslynator.exe"}}
 }
 
-// roslynatorExtraArgs 是默认参数之外要加的开关
+// roslynatorExtraArgs 默认参数之外要加的开关
 //
 // AnalysisMode=All 打开默认关闭的分析器集合，其中 CA2000 是资源未释放，默认参数下
 // 完全查不到这一类。代价是规则面变宽，由 roslynatorNoiseRules 压制
 var roslynatorExtraArgs = []string{"-p", "AnalysisMode=All"}
 
-// roslynatorNoiseRules 是报了对整个文件重复且不指向具体缺陷的规则
+// roslynatorNoiseRules 报了对整个文件重复且不指向具体缺陷的规则
 //
 // CA1822 会把同一类里的多个成员各报一次，CA1823 与 CS0169 说的是同一件事。
 // 留着它们会让真实缺陷被淹掉
@@ -80,10 +79,6 @@ type sarifResult struct {
 			} `json:"region"`
 		} `json:"physicalLocation"`
 	} `json:"locations"`
-}
-
-func (a *RoslynatorAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *RoslynatorAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
@@ -183,7 +178,7 @@ func roslynatorProject(projectPath string) (string, error) {
 			return nil
 		}
 		if info.IsDir() {
-			// 构建产物目录里不会有 csproj，但遍历进去很慢
+			// 构建产物目录里不会有 csproj，而且遍历进去很慢
 			name := info.Name()
 			if name == "bin" || name == "obj" || name == ".git" || name == "node_modules" {
 				return filepath.SkipDir
@@ -211,7 +206,7 @@ func roslynatorProject(projectPath string) (string, error) {
 	return shallowest, nil
 }
 
-// roslynatorInvocation 是解析好的命令
+// roslynatorInvocation 解析好的命令
 type roslynatorInvocation struct {
 	name string
 }
@@ -250,8 +245,8 @@ func mapSarifLevel(level string) Severity {
 
 // trimBOM 去掉 UTF-8 BOM
 //
-// Roslynator 输出的 SARIF 带 BOM，json.Unmarshal 会在第 0 字节报错。浏览器和 jq 都
-// 能正常解析，所以这个问题只在集成里出现
+// Roslynator 输出的 SARIF 带 BOM，json.Unmarshal 会在第 0 字节报错
+// 浏览器和 jq 都能正常解析，所以这个问题只在集成里出现
 func trimBOM(data []byte) []byte {
 	return bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 }
@@ -272,8 +267,7 @@ func fileURIToRel(uri, projectPath string) string {
 
 // roslynatorDocURL 给出规则说明地址
 //
-// 编译器与 .NET 内置规则（CS/CA）在微软文档里，Roslynator 自己的规则（RCS）在它
-// 的仓库里，两套前缀对应两个空间
+// 编译器与 .NET 内置规则（CS/CA）在微软文档里，Roslynator 自己的规则（RCS）在它的仓库里，两套前缀对应两个空间
 func roslynatorDocURL(rule string) string {
 	switch {
 	case strings.HasPrefix(rule, "CS"):

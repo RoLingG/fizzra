@@ -18,7 +18,7 @@ import (
  * 这个人正在用的界面语言。
  */
 
-// Strings 是报告里出现的一整套文案
+// Strings 报告里出现的一整套文案
 type Strings struct {
 	Lang string
 

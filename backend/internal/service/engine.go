@@ -32,7 +32,7 @@ type Engine struct {
 	// ruleMu 保护 ruleEngine 与 ruleEngineLang
 	ruleMu     sync.RWMutex
 	ruleEngine *rule.Engine
-	// ruleEngineLang 是 ruleEngine 编译时所用的语言
+	// ruleEngineLang  ruleEngine 编译时所用的语言
 	//
 	// 规则引擎的注释、字符串和循环作用域过滤器都依赖具体语言的语法，所以每种语言
 	// 各需一个实例。把语言标识和引擎放在一起，缓存命中时才能判断它是否真的适用于

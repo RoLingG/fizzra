@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config 是 Fizzra 的根配置
+// Config  Fizzra 的根配置
 //
 // 加载顺序（后者覆盖前者）：
 //   - 内置默认值
@@ -36,7 +36,7 @@ type ServerConfig struct {
 	Port int    `yaml:"port"`
 	// Mode 取值之一：debug、release、test
 	Mode string `yaml:"mode"`
-	// CORSOrigins 是开发用前端允许的来源列表
+	// CORSOrigins 开发用前端允许的来源列表
 	CORSOrigins []string `yaml:"corsOrigins"`
 }
 
@@ -48,16 +48,16 @@ type DatabaseConfig struct {
 }
 
 type WorkspaceConfig struct {
-	// Root 是存放克隆下来的仓库和报告的目录
+	// Root 存放克隆下来的仓库和报告的目录
 	Root string `yaml:"root"`
 }
 
 type ScanConfig struct {
-	// Concurrency 是同时执行的分析数
+	// Concurrency 同时执行的分析数
 	Concurrency int `yaml:"concurrency"`
-	// Timeout 是单次分析的墙上时间预算
+	// Timeout 单次分析的墙上时间预算
 	Timeout time.Duration `yaml:"timeout"`
-	// PerToolTimeout 是单个外部工具的墙上时间预算
+	// PerToolTimeout 单个外部工具的墙上时间预算
 	PerToolTimeout time.Duration `yaml:"perToolTimeout"`
 	// EnabledAnalyzers 限定分析器注册表的范围，为空表示全部
 	EnabledAnalyzers []string `yaml:"enabledAnalyzers"`
@@ -122,7 +122,7 @@ func (c *Config) AnalyzerFlag(analyzerName, key string, fallback bool) (bool, er
 }
 
 type QualityConfig struct {
-	// MinScore 是整体质量评分的通过阈值
+	// MinScore 整体质量评分的通过阈值
 	MinScore float64 `yaml:"minScore"`
 	// MaxCritical 与 MaxHigh 是门禁容忍的计数上限
 	MaxCritical int `yaml:"maxCritical"`
@@ -383,7 +383,7 @@ func applyEnv(cfg *Config) {
 	}
 }
 
-// Warning 是一个被修正而非致命的问题
+// Warning 一个被修正而非致命的问题
 //
 // 这个区分很要紧。未知键意味着你写的设置根本没被应用，静默且危险，所以那是错误。
 // 而一个我们认识的键取到了越界值是另一回事，我们清楚你想配什么，可以夹取它，
@@ -522,7 +522,7 @@ func clampIntAndWarn(c *Config, field string, value, lo, hi int) int {
 	return repaired
 }
 
-// Addr 是 HTTP 服务绑定的 host:port
+// Addr  HTTP 服务绑定的 host:port
 func (c *Config) Addr() string {
 	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
 }

@@ -3,7 +3,6 @@ package analyzer
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -42,8 +41,7 @@ func (a *RuffAnalyzer) InstallHint() string {
 // ProbeCommands 告诉可用性探测 python -m ruff 同样能满足该分析器
 //
 // 没有它时，界面会对一个用户确实装了的工具报「缺失」，因为 Windows 上 pip 会把
-// 控制台脚本装到 PATH 之外。扫描本身其实还能跑，分析器运行时会回退，于是报告
-// 和结果互相矛盾，那是最糟的组合
+// 控制台脚本装到 PATH 之外。扫描本身其实还能跑，分析器运行时会回退，于是报告和结果互相矛盾
 func (a *RuffAnalyzer) ProbeCommands() [][]string {
 	return [][]string{{"ruff"}, {"python", "-m", "ruff"}, {"python3", "-m", "ruff"}}
 }
@@ -52,10 +50,10 @@ func (a *RuffAnalyzer) ProbeCommands() [][]string {
 //
 // 字段名有两处不合常规，都是对着真实输出而非文档确认的
 //
-//   - 位置在 location/end_location 之下，字段名是 row 而不是 line，两者都从
-//     1 开始
-//   - severity 存在但恒为字面量 "error"，纯风格规则也一样。它不携带信息，所以
-//     严重级别改从规则码推导，见 mapRuffSeverity
+//   - 位置在 location/end_location 之下，字段名是 row 而不是 line，
+//     两者都从 1 开始
+//   - severity 存在但恒为字面量 "error"，纯风格规则也一样。它不携带信息，
+//     所以严重级别改从规则码推导，见 mapRuffSeverity
 type ruffFinding struct {
 	Code    string `json:"code"`
 	Name    string `json:"name"`
@@ -76,13 +74,11 @@ type ruffFinding struct {
 	// 大多数发现根本没有 fix 键，所以这里保持 nil，也就不会设置 FixExample
 	//
 	// edits 带的是替换后的文本而不是原文，content 是该 span 应该变成的内容，
-	// 对 F401 这类删除型规则来说它是空串。原始行必须从文件里读回来，这正是
-	// SnippetReader 的用途
+	// 对 F401 这类删除型规则来说它是空串。原始行必须从文件里读回来，这正是 SnippetReader 的用途
 	Fix *struct {
 		Message string `json:"message"`
 		// Applicability 取 safe 或 unsafe。应用该改写可能改变行为时 ruff 会标为
-		// unsafe，而一个作者没读过就自动应用的改动，恰恰是本工具不该暗示它没
-		// 问题的那种变更
+		// unsafe，而一个作者没读过就自动应用的改动，这种变更应该让作者知道
 		Applicability string `json:"applicability"`
 		Edits         []struct {
 			Content  string `json:"content"`
@@ -96,10 +92,6 @@ type ruffFinding struct {
 	} `json:"fix"`
 }
 
-func (a *RuffAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 func (a *RuffAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	bin, err := ruffCommand(actx.Runner)
 	if err != nil {
@@ -109,8 +101,8 @@ func (a *RuffAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	// 规则集的取舍比看上去重要，两个极端都是错的
 	//
 	// ruff 默认只查风格，把它跑在一个含有 eval() 和 os.system() 的文件上，它
-	// 不会报出任何安全问题，因为源自 bandit 的 S 规则默认不开启。Fizzra 用户
-	// 看到「0 个问题」会以为代码是安全的
+	// 不会报出任何安全问题，因为源自 bandit 的 S 规则默认不开启。
+	// Fizzra 用户看到「0 个问题」会以为代码是安全的
 	//
 	// --select ALL 能解决这点，但会严重过犹不及，风格类规则的数量会把安全问题埋掉，
 	// 把作者的文档规范和一个命令注入并列报出来，只会教人忽略这个工具
@@ -126,8 +118,7 @@ func (a *RuffAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 		if len(out) == 0 {
 			return nil, fmt.Errorf("ruff failed: %w", err)
 		}
-		// --exit-zero 本应避免这种情况，但退出码非零且有输出仍然说明发现了问题，
-		// 所以照常解析而不是丢弃
+		// --exit-zero 本应避免这种情况，但退出码非零且有输出仍然说明发现了问题，所以照常解析而不是丢弃
 		actx.Log.Debug("ruff exited non-zero with output", "err", err)
 	}
 
@@ -140,15 +131,15 @@ func (a *RuffAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 
 // ruffRuleGroups 把配置开关映射到它启用的 ruff 规则前缀
 //
-// 除描述缺陷的那些之外，所有分组默认关闭，默认值就是一次无配置扫描报出来的东西。
+// 除描述缺陷的那些之外，所有分组默认关闭，默认值就是一次无配置扫描报出来的东西
 // 这是刻意的取舍，风格类规则挤占注意力，会让用户忽略这个工具
 //
-// 风格分组之所以提供，是因为团队可能想要，而不是因为想要就不对。它们默认不开，
-// 好让默认结论只关乎缺陷
+// 风格分组之所以提供，是因为团队可能想要，而不是因为想要就不对
+// 它们默认不开，好让默认结论只关乎缺陷
 var ruffRuleGroups = []struct {
-	// Key 是 analyzerOptions.ruff 之下的配置键
+	// Key  analyzerOptions.ruff 之下的配置键
 	Key string
-	// Prefixes 是该开关启用的 ruff 规则码
+	// Prefixes 该开关启用的 ruff 规则码
 	Prefixes []string
 	// Default 表示无配置时该分组是否开启
 	Default bool
@@ -285,10 +276,7 @@ func parseBool(raw string, fallback bool) bool {
 	return fallback
 }
 
-// Options 实现 OptionProvider，把开关暴露给面板
-//
-// 声明在这里而不是在界面里写死，这样新增一个分组只需改 ruffRuleGroups 的一行，
-// 控件会自己出现
+// Options 实现 OptionProvider，把开关暴露给面板，这样新增一个分组只需改 ruffRuleGroups
 func (a *RuffAnalyzer) Options() []DescriptorOption {
 	out := make([]DescriptorOption, 0, len(ruffRuleGroups))
 	for _, g := range ruffRuleGroups {

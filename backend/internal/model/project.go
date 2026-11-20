@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// Project 是一个注册用于分析的仓库
+// Project 一个注册用于分析的仓库
 type Project struct {
 	ID          string `json:"id" gorm:"primaryKey;size:64"`
 	Name        string `json:"name" gorm:"uniqueIndex;size:128"`
@@ -17,7 +17,7 @@ type Project struct {
 	// 它与 Language 正交，一个 Wails 项目的 Language 是 go，Kind 是 wails，
 	// 分开才能避免枚举那些根本不可能存在的「框架-语言」组合，比如 rust-wails
 	Kind string `json:"kind" gorm:"size:32"`
-	// Color 是面板卡片用的十六进制强调色
+	// Color 面板卡片用的十六进制强调色
 	Color string `json:"color" gorm:"size:16"`
 
 	// DefaultAnalyzers 固定该项目的分析器集合，为空表示用注册表的默认值
@@ -71,7 +71,7 @@ func KindIsValidFor(lang, kind string) bool {
 	return lang == LanguageGo && kind == ProjectKindWails
 }
 
-// Analysis 是对项目的一次扫描运行
+// Analysis 对项目的一次扫描运行
 type Analysis struct {
 	ID        string `json:"id" gorm:"primaryKey;size:64"`
 	ProjectID string `json:"projectId" gorm:"index;size:64"`
@@ -87,7 +87,7 @@ type Analysis struct {
 
 	Analyzers StringSlice `json:"analyzers" gorm:"type:text"`
 
-	// Progress 是任务执行器报告的 0 到 100
+	// Progress 任务执行器报告的 0 到 100
 	Progress int `json:"progress"`
 
 	StartedAt  time.Time  `json:"startedAt"`
@@ -143,7 +143,7 @@ type Analysis struct {
 	// 跳过」：前者放行等于什么都验过还报通过，后者在有度量兜底时是可以接受的过渡
 	AnalyzersCompleted int `json:"analyzersCompleted" gorm:"default:0"`
 
-	// Metrics 是 JSON 编码的 model.Metrics 快照
+	// Metrics  JSON 编码的 model.Metrics 快照
 	Metrics Metrics `json:"metrics" gorm:"type:text"`
 
 	CreatedAt time.Time `json:"createdAt"`
@@ -172,7 +172,7 @@ const (
 	GateSkipped = "skipped"
 )
 
-// Rule 是用户自定义或内置的模式规则
+// Rule 用户自定义或内置的模式规则
 type Rule struct {
 	ID       string `json:"id" gorm:"primaryKey;size:64"`
 	Name     string `json:"name" gorm:"uniqueIndex;size:128"`
@@ -181,14 +181,14 @@ type Rule struct {
 	Severity Severity `json:"severity" gorm:"size:16"`
 	Message  string   `json:"message" gorm:"type:text"`
 
-	// Patterns 是对源码行做匹配的 Go 正则表达式
+	// Patterns 对源码行做匹配的 Go 正则表达式
 	Patterns MultiString `json:"patterns" gorm:"type:text"`
-	// Paths 是限定该规则适用于哪些文件的 glob
+	// Paths 限定该规则适用于哪些文件的 glob
 	Paths MultiString `json:"paths" gorm:"type:text"`
-	// Exclude 是让规则在匹配到的文件上失效的 glob
+	// Exclude 让规则在匹配到的文件上失效的 glob
 	Exclude MultiString `json:"exclude" gorm:"type:text"`
 
-	// Advice 是在界面和命令行报告里展示的修复提示
+	// Advice 在界面和命令行报告里展示的修复提示
 	Advice string `json:"advice" gorm:"type:text"`
 
 	// Fix 是修改前后对照示例，可选，改法完全取决于上下文的规则只带建议
@@ -208,7 +208,7 @@ type Rule struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// QualityGate 是持久化的通过与否策略
+// QualityGate 持久化的通过与否策略
 type QualityGate struct {
 	ID string `json:"id" gorm:"primaryKey;size:64"`
 	// 必须有 uniqueIndex：门禁是用 ON CONFLICT (project_id) 做 upsert 的

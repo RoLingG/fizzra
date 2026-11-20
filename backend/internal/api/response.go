@@ -36,7 +36,7 @@ func NewHandler(svc *service.Service, log *slog.Logger) *Handler {
 // 响应信封
 // ---------------------------------------------------------------------------
 
-// Response 是统一的接口信封
+// Response 统一的接口信封
 //
 // 每个载荷都包一层，前端只需处理一种形状，错误除消息外还带机器可读的码
 type Response struct {
@@ -52,7 +52,7 @@ type Meta struct {
 	Offset int   `json:"offset,omitempty"`
 }
 
-// ErrorBody 是信封中错误的那一半
+// ErrorBody 信封中错误的那一半
 type ErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -104,7 +104,7 @@ func classify(err error) (int, string) {
 	return http.StatusInternalServerError, "internal_error"
 }
 
-// badRequest 是 handler 里检出输入问题时的快捷方式
+// badRequest  handler 里检出输入问题时的快捷方式
 func (h *Handler) badRequest(c *gin.Context, msg string) {
 	c.JSON(http.StatusBadRequest, Response{
 		Error: &ErrorBody{Code: "invalid_input", Message: msg},

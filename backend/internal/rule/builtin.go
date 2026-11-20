@@ -21,7 +21,7 @@ type builtinDef struct {
 	ForbidInLoop bool
 }
 
-// goGlobs 是 Go 源码类规则的默认作用域
+// goGlobs  Go 源码类规则的默认作用域
 var goGlobs = []string{"**/*.go"}
 
 // goGeneratedSkip 把生成物、依赖和测试夹具挡在结果之外
@@ -37,7 +37,7 @@ var goGeneratedSkip = []string{
 	"**/wailsjs/**",
 }
 
-// goExclude 是那些描述线上代码缺陷的规则的默认作用域
+// goExclude 那些描述线上代码缺陷的规则的默认作用域
 //
 // 它排除测试文件。测试套件合法地做生产代码不该做的事，故意 panic 走 recover 路径、
 // 构造注入载荷、硬编码示例凭据、在初始化里调 context.Background()。规则在这些地方
@@ -46,7 +46,7 @@ func goExclude() []string {
 	return append(append([]string{}, goGeneratedSkip...), "**/*_test.go")
 }
 
-// BuiltinRules 是随发布一起提供的规则集
+// BuiltinRules 随发布一起提供的规则集
 //
 // 有两条设计原则约束这份列表
 //

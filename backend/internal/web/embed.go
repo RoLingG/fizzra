@@ -21,8 +21,7 @@ import (
 //go:generate npm --prefix ../../../frontend ci
 //go:generate npm --prefix ../../../frontend run build
 
-// all: 前缀不能省，Vite 会在以 "_" 或 "." 开头的目录下产出资源，
-// 没有这个前缀这些文件会被漏掉
+// all: 前缀不能省，Vite 会在以 "_" 或 "." 开头的目录下产出资源，没有这个前缀这些文件会被漏掉
 //
 //go:embed all:dist
 var embedded embed.FS

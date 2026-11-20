@@ -6,7 +6,7 @@ import (
 	"github.com/rolingg/fizzra/backend/internal/model"
 )
 
-// Data 是 service 层使用的持久化契约
+// Data  service 层使用的持久化契约
 //
 // 每个方法返回的都是 store 的错误而不是 GORM 的错误，service 因此永远不导入 ORM。
 // 正是这一点让 SQLite 实现可以被替换（比如换成 PostgreSQL）而不必碰业务逻辑
@@ -101,7 +101,7 @@ type IssueFilter struct {
 	OrderBy    string
 }
 
-// RuleStat 是一条按规则聚合的行
+// RuleStat 一条按规则聚合的行
 type RuleStat struct {
 	Rule     string `json:"rule"`
 	Analyzer string `json:"analyzer"`

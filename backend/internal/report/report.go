@@ -35,7 +35,7 @@ type Report struct {
 	Version string `json:"version"`
 }
 
-// TrendPoint 是历史图上的一个评分采样点
+// TrendPoint 历史图上的一个评分采样点
 type TrendPoint struct {
 	At         string  `json:"at"`
 	Score      float64 `json:"score"`
@@ -43,7 +43,7 @@ type TrendPoint struct {
 	GateStatus string  `json:"gateStatus"`
 }
 
-// Stats 是问题汇总
+// Stats 问题汇总
 type Stats struct {
 	Total      int            `json:"total"`
 	BySeverity map[string]int `json:"bySeverity"`
@@ -52,7 +52,7 @@ type Stats struct {
 	TopRules   []RuleStat     `json:"topRules"`
 }
 
-// FileStat 是按文件统计的问题数
+// FileStat 按文件统计的问题数
 type FileStat struct {
 	File  string `json:"file"`
 	Count int    `json:"count"`
@@ -61,7 +61,7 @@ type FileStat struct {
 	Errors   int `json:"errors"`
 }
 
-// RuleStat 是按规则统计的问题数
+// RuleStat 按规则统计的问题数
 type RuleStat struct {
 	Rule     string `json:"rule"`
 	Analyzer string `json:"analyzer"`

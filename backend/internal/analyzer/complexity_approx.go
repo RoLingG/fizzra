@@ -15,9 +15,9 @@ import (
 
 // complexityRules 描述一门语言的判定点与函数头形状
 type complexityRules struct {
-	// decision 是每个都会增加一个判定点的关键字
+	// decision 每个都会增加一个判定点的关键字
 	decision []string
-	// conditions 是同样算判定点的运算符
+	// conditions 同样算判定点的运算符
 	conditions []string
 	// caseLabels 为真时，switch/case 的每个 case 计一次
 	caseLabels bool
@@ -126,7 +126,7 @@ func approxComplexity(rel string, src string, rules complexityRules) []approxFun
 	return out
 }
 
-// approxFunction 是一个近似识别出的函数
+// approxFunction 一个近似识别出的函数
 type approxFunction struct {
 	Name       string
 	Line       int
@@ -341,14 +341,14 @@ func phpFuncHeader(trimmed string) bool {
 		}
 	}
 	// 必须真的出现 function 关键字，且它后面跟着名字
-	idx := strings.Index(trimmed, "function")
-	if idx < 0 {
+	_, after0, ok := strings.Cut(trimmed, "function")
+	if !ok {
 		return false
 	}
-	after := strings.TrimSpace(trimmed[idx+len("function"):])
-	if after == "" || !strings.Contains(after, "(") {
+	afterTrim := strings.TrimSpace(after0)
+	if afterTrim == "" || !strings.Contains(afterTrim, "(") {
 		return false
 	}
 	// `function (` 是匿名闭包，没有名字可报
-	return !strings.HasPrefix(after, "(")
+	return !strings.HasPrefix(afterTrim, "(")
 }

@@ -1,6 +1,6 @@
 // Package analyzer 定义 Fizzra 的分析器契约，以及所有内置和第三方分析器注册用的插件注册表
 //
-// 契约刻意做得很小，Name 加 Analyze。分析器需要宿主提供的一切（日志、超时、
+// 契约刻意做得很小，Name 加 AnalyzeWithContext。分析器需要宿主提供的一切（日志、超时、
 // 规则引擎、仓库根目录）都挂在 Context 上，这样日后再加能力也不会破坏已有的分析器
 package analyzer
 
@@ -14,27 +14,18 @@ import (
 	"time"
 )
 
-// Analyzer 是每个插件都必须满足的契约
+// Analyzer 每个插件都必须满足的契约
 type Analyzer interface {
 	// Name 是在问题、配置和 API 中使用的稳定标识，在同一个注册表内必须唯一且为小写（如 "golangci"）
 	Name() string
-	// Analyze 扫描 projectPath 并返回发现的问题
-	// 返回非 nil 错误会把该分析器本次运行标记为失败，
-	// 随错误一起返回的部分结果仍会被记录
-	Analyze(ctx context.Context, projectPath string) ([]Issue, error)
-}
-
-// ContextAware 可选接口，供需要宿主服务（规则引擎、文件集合、命令执行器、按工具的超时）
-type ContextAware interface {
+	// AnalyzeWithContext 扫描项目并返回发现的问题
+	// 返回非 nil 错误会把该分析器本次运行标记为失败，随错误一起返回的部分结果仍会被记录
 	AnalyzeWithContext(ctx *Context) ([]Issue, error)
 }
 
-// Invoke 通过正确的入口运行分析器，调用方应该用它而不是直接调 Analyzer.Analyze
+// Invoke 运行分析器
 func Invoke(a Analyzer, ctx *Context) ([]Issue, error) {
-	if ca, ok := a.(ContextAware); ok {
-		return ca.AnalyzeWithContext(ctx)
-	}
-	return a.Analyze(ctx, ctx.ProjectPath)
+	return a.AnalyzeWithContext(ctx)
 }
 
 // Describable 可选接口，分析器实现它以向界面暴露元数据（这个分析器检查什么），避免宿主写死一个按分析器名分支的 switch
@@ -49,8 +40,7 @@ type Describable interface {
 // Probeable 可选接口，供可以通过多个命令调到的工具实现
 // 默认探测是对 Requires() 里的每个名字做 LookPath，对独立分发的二进制够用，
 // 但对只能作为语言模块安装的工具不够，Windows 上 pip 安装的脚本目录常常不在 PATH 上，
-// 而 `python -m ruff` 是可以用的。这种情况下报「缺失」是错的，
-// 而且是更容易让人困惑的那种错，用户确实装了，界面却说他没装
+// 而 `python -m ruff` 是可以用的。这种情况下报「缺失」会让用户困惑，用户确实装了却提示没装
 type Probeable interface {
 	// ProbeCommands 返回能让该分析器工作的备选命令，按优先级排列
 	// 每项是命令名加上它的参数，返回空表示用默认的 Requires() 探测
@@ -79,31 +69,26 @@ func analyzerInstallHint(a Analyzer) string {
 
 // ProjectScoped 可选接口，供「工具装在项目里、而不是 PATH 上」的分析器实现
 //
-// 背景，可用性探测（Availability.Probe）是全局的，它只看某个命令名在不在 PATH 上。
+// 背景，可用性探测是全局的，它只看某个命令名在不在 PATH 上。
 // 对 Go、Rust、Python 那类全局安装的工具这是准的，但对经 npx 调用的 npm 包就失效，
 // 探测看到 npx 在，便判定分析器就绪，而真正要跑的那个包其实只存在于项目自己的
 // node_modules 里。于是界面会声称一切就绪，扫描时才报「包缺失」
 //
-// 实现这个接口的分析器让可用性检查能落到项目维度，判断的是「这个项目里能不能跑」，
-// 而不是「这台机器上有没有」
+// 实现这个接口的分析器让可用性检查能落到项目维度，判断的是「这个项目里能不能跑」，而不是「这台机器上有没有」
 type ProjectScoped interface {
 	// AvailableIn 报告该分析器在给定项目里是否具备运行条件
 	//
 	// 只做文件系统与 PATH 的检查，不要起子进程，探测会和扫描共用 --timeout，
-	// 慢的探测会被杀掉，于是一个装好的工具被报成缺失。同样一段论证写在
-	// hasLocalBin 上方
+	// 慢的探测会被杀掉，于是一个装好的工具被误报成缺失
 	AvailableIn(projectPath string) bool
 }
 
 // LanguageScoped 可选接口，供只处理特定语言的分析器实现
 //
-// 没有它时，每个注册的分析器都会对着每个项目运行，各自决定适不适用，Go 工具
-// 的包装器就是这样最后变成手写 go.mod 判断的。这样能work，但它是约定而不是
-// 契约，而且失败时悄无声息，无法区分「我不处理 Rust」和「我没发现问题」，
-// 于是一个 Rust 项目会被评成干净的
+// 没有它时，每个注册的分析器都会对着每个项目运行，各自决定适不适用，Go 工具 的包装器就是这样，最后变成手写 go.mod 判断的
+// 这样能 work，但它是约定而不是契约，而且失败时悄无声息，无法区分「我不处理 Rust」和「我没发现问题」，于是一个 Rust 项目会被评成干净的
 //
-// 不实现该接口的分析器对每个项目都运行，这对与语言无关的检查是正确的默认
-// （行数统计、密钥扫描）
+// 不实现该接口的分析器对每个项目都运行，这对与语言无关的检查是正确的默认（行数统计、密钥扫描）
 type LanguageScoped interface {
 	// Languages 返回该分析器处理的语种标识，取值同 model.Language*
 	// 空切片表示「所有语言」
@@ -132,7 +117,7 @@ func AppliesToLanguage(a Analyzer, lang string) bool {
 	return slices.Contains(langs, lang)
 }
 
-// analyzerAvailableIn 是 ProjectScoped 的共用实现
+// analyzerAvailableIn  ProjectScoped 的共用实现
 // PATH 上有就算有，否则看项目本地的 node_modules/.bin
 //
 // 两个位置对应两种安装方式，全局装的在 PATH 上，装进项目的在 devDependencies 里。
@@ -155,37 +140,37 @@ type goOnly struct{}
 
 func (goOnly) Languages() []string { return []string{modelLanguageGo} }
 
-// pythonOnly 是 Python 分析器对应的标记
+// pythonOnly Python 分析器对应的标记
 type pythonOnly struct{}
 
 func (pythonOnly) Languages() []string { return []string{modelLanguagePython} }
 
-// javascriptOnly 是 JavaScript/TypeScript 分析器的标记
+// javascriptOnly JavaScript/TypeScript 分析器的标记
 type javascriptOnly struct{}
 
 func (javascriptOnly) Languages() []string { return []string{modelLanguageJavaScript} }
 
-// rustOnly 是 Rust 分析器的标记
+// rustOnly Rust 分析器的标记
 type rustOnly struct{}
 
 func (rustOnly) Languages() []string { return []string{modelLanguageRust} }
 
-// javaOnly 是 Java 分析器的标记
+// javaOnly Java 分析器的标记
 type javaOnly struct{}
 
 func (javaOnly) Languages() []string { return []string{modelLanguageJava} }
 
-// csharpOnly 是 C# 分析器的标记
+// csharpOnly C# 分析器的标记
 type csharpOnly struct{}
 
 func (csharpOnly) Languages() []string { return []string{modelLanguageCSharp} }
 
-// cppOnly 是 C/C++ 分析器的标记
+// cppOnly C/C++ 分析器的标记
 type cppOnly struct{}
 
 func (cppOnly) Languages() []string { return []string{modelLanguageCpp} }
 
-// phpOnly 是 PHP 分析器的标记
+// phpOnly PHP 分析器的标记
 type phpOnly struct{}
 
 func (phpOnly) Languages() []string { return []string{modelLanguagePHP} }
@@ -217,7 +202,7 @@ const modelLanguageCpp = "cpp"
 // modelLanguagePHP 对应 model.LanguagePHP，原因同上
 const modelLanguagePHP = "php"
 
-// Issue 是面向分析器的发现视图
+// Issue 面向分析器的发现视图
 //
 // 与 model.Issue 保持一致，分析器因此不依赖持久层。
 // service 层负责两者之间的映射，并补上 ID、项目与分析归属和指纹
@@ -228,7 +213,7 @@ type Issue struct {
 
 	Message string
 	Advice  string
-	// Fix 是该分析器提供的修改前后对照示例
+	// Fix 该分析器提供的修改前后对照示例
 	Fix FixExample
 
 	File   string
@@ -273,12 +258,12 @@ const (
 
 // Context 把宿主服务传入 Analyze
 type Context struct {
-	// Context 是本次分析的取消与超时作用域
+	// Context 本次分析的取消与超时作用域
 	context.Context //nolint:containedctx
 
-	// ProjectPath 是仓库根目录的绝对路径
+	// ProjectPath 仓库根目录的绝对路径
 	ProjectPath string
-	// ProjectName 是用于消息中的人类可读名称
+	// ProjectName 用于消息中的人类可读名称
 	ProjectName string
 	// ProjectKind 是框架（"wails"），或空
 	// 与 ProjectLanguage 正交，一个 Wails 应用的语言是 go，框架是 wails
@@ -289,7 +274,7 @@ type Context struct {
 	// Root 是工作区根目录，用于定位共享缓存
 	Root string
 
-	// Log 是预先打好标签的日志器
+	// Log 预先打好标签的日志器
 	Log *slog.Logger
 	// ToolTimeout 限制单次外部命令调用的时长
 	ToolTimeout time.Duration
@@ -299,7 +284,6 @@ type Context struct {
 	Files *FileSet
 	// Rules 是编译好的自定义规则引擎，分析器支持时才有
 	// 类型是 RuleEvaluator 而不是 rule 包，避免分析器包导入 rule
-	//（后者又导入 model，会把存储类型拖进每个插件）
 	Rules RuleEvaluator
 	// Options 按分析器名报告配置里的对应设置
 	//
@@ -342,7 +326,7 @@ func (c *Context) OptionBool(analyzerName, key string, fallback bool) bool {
 	return fallback
 }
 
-// RuleEvaluator 是自定义规则分析器所需的最小接口面
+// RuleEvaluator 自定义规则分析器所需的最小接口面
 type RuleEvaluator interface {
 	Evaluate(relPath string, content []byte) []RuleMatch
 	Len() int
@@ -520,18 +504,18 @@ type OptionProvider interface {
 	Options() []DescriptorOption
 }
 
-// DescriptorOption 是一个可配置的分析器设置
+// DescriptorOption 一个可配置的分析器设置
 type DescriptorOption struct {
 	// Key 是设置名，在配置里写作 analyzerOptions.<analyzer>.<key>，
 	// 也是设置接口接受的 JSON 字段名
 	Key string `json:"key"`
-	// Default 是未配置时的取值
+	// Default 未配置时的取值
 	Default bool `json:"default"`
 	// Description 说明启用该选项会做什么
 	Description string `json:"description"`
 }
 
-// Descriptor 是面向界面的分析器描述
+// Descriptor 面向界面的分析器描述
 type Descriptor struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
@@ -607,7 +591,7 @@ func firstLine(s string) string {
 	markers := []string{"fatal:", "error:", "cannot ", "failed to ", "unable to "}
 
 	var fallback string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

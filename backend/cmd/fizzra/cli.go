@@ -867,7 +867,7 @@ type ciConfig struct {
 	PrintProject bool
 }
 
-// ciGateInput 是一次门禁重算要用的数据
+// ciGateInput 一次门禁重算要用的数据
 type ciGateInput struct {
 	Project  *model.Project
 	Analysis *model.Analysis
@@ -1075,7 +1075,7 @@ func resolveReportTarget(ctx context.Context, app *App, opts cliOptions) (*model
 // 输出器
 // ---------------------------------------------------------------------------
 
-// reportTarget 是一次报告导出要用的数据
+// reportTarget 一次报告导出要用的数据
 type reportTarget struct {
 	App      *App
 	Project  *model.Project

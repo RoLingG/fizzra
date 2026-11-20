@@ -44,7 +44,7 @@ type CommentSyntax struct {
 	BlockNests bool
 }
 
-// StringDelim 是一种字符串字面量形式
+// StringDelim 一种字符串字面量形式
 type StringDelim struct {
 	// Open 和 Close 是定界符。单个引号字符时两者相同
 	Open, Close string

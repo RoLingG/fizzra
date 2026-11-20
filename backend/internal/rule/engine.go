@@ -13,7 +13,7 @@ import (
 	"github.com/rolingg/fizzra/backend/internal/model"
 )
 
-// Rule 是 model.Rule 的可执行形式
+// Rule  model.Rule 的可执行形式
 // 正则和 glob 都预先编译好，扫描上千个文件时不必反复编译
 type Rule struct {
 	Model    model.Rule
@@ -25,13 +25,13 @@ type Rule struct {
 	excludeGlobs []globMatcher
 }
 
-// globMatcher 是编译好的 glob
+// globMatcher 编译好的 glob
 type globMatcher struct {
 	raw string
 	re  *regexp.Regexp
 }
 
-// Match 是文件内的一次模式命中
+// Match 文件内的一次模式命中
 type Match struct {
 	Rule     string
 	Severity model.Severity
@@ -164,7 +164,7 @@ func (e *Engine) AppliesTo(relPath string) bool {
 // 实际未进入同一作用域时是没问题的，crypto/rand 恰恰是正确的选择，而规则
 // 自身的定义文本也会匹配它自己的模式。这些过滤器把按行匹配看不到的上下文补上
 
-// matchContext 是一行的词法状态
+// matchContext 一行的词法状态
 type matchContext struct {
 	// inComment 报告该行是否在注释里
 	inComment bool

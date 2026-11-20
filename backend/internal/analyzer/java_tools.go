@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,7 +37,7 @@ func (a *PmdAnalyzer) ProbeCommands() [][]string {
 	return [][]string{{"pmd"}, {"pmd.bat"}}
 }
 
-// pmdRulesets 是交给 PMD 的规则类别
+// pmdRulesets 交给 PMD 的规则类别
 //
 // 不用默认规则集，Maven 插件那份只有 41 条，且不含 security。codestyle 也不整块
 // 引入，它会把「参数可以加 final」这类提醒淹掉真实缺陷，个别有价值的规则单独加
@@ -105,10 +104,6 @@ func (e pmdErr) text() string {
 	return "unknown PMD error"
 }
 
-func (a *PmdAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 func (a *PmdAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	cmd, err := pmdCommand(actx)
 	if err != nil {
@@ -167,7 +162,7 @@ func (a *PmdAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	return issues, nil
 }
 
-// pmdInvocation 是解析好的命令
+// pmdInvocation 解析好的命令
 type pmdInvocation struct {
 	name string
 }

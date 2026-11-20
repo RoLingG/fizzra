@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// defaultSkipDirs 是永远不值得扫描的目录
+// defaultSkipDirs 永远不值得扫描的目录
 // 构建产物和依赖是已经看过的内容的重复，VCS 元数据根本不是用户代码
 var defaultSkipDirs = map[string]bool{
 	".git":         true,
@@ -41,13 +41,13 @@ type FileSet struct {
 
 // FileInfo 描述集合中的一个文件
 type FileInfo struct {
-	// Abs 是绝对路径
+	// Abs 绝对路径
 	Abs string
-	// Rel 是相对项目根目录、以斜杠分隔的路径
+	// Rel 相对项目根目录、以斜杠分隔的路径
 	Rel string
 	// Ext 含点号且为小写（".go"）
 	Ext string
-	// Size 是文件大小，单位为字节
+	// Size 文件大小，单位为字节
 	Size int64
 }
 
@@ -115,7 +115,7 @@ func NewFileSet(root string) (*FileSet, error) {
 	return set, nil
 }
 
-// Root 是项目的绝对根目录
+// Root 项目的绝对根目录
 func (f *FileSet) Root() string { return f.root }
 
 // All 返回集合中的所有文件
@@ -192,7 +192,6 @@ func shouldSkipDir(name, rel string) bool {
 	if skip, ok := defaultSkipDirs[name]; ok {
 		return skip
 	}
-	// 后端仓库里嵌套的模块和前端产物
 	if name == "frontend" && rel != "frontend" {
 		return false
 	}
@@ -259,18 +258,18 @@ func (f *FileSet) ignored(rel string) bool {
 }
 
 func matchIgnorePattern(pattern, rel string) bool {
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(rel, strings.TrimSuffix(pattern, "*"))
+	if before, ok := strings.CutSuffix(pattern, "*"); ok {
+		return strings.HasPrefix(rel, before)
 	}
-	if strings.HasPrefix(pattern, "*") {
-		return strings.HasSuffix(rel, strings.TrimPrefix(pattern, "*"))
+	if after, ok := strings.CutPrefix(pattern, "*"); ok {
+		return strings.HasSuffix(rel, after)
 	}
 	if pattern == rel {
 		return true
 	}
 	// 裸名字在任意深度都匹配
 	if !strings.Contains(pattern, "/") {
-		for _, part := range strings.Split(rel, "/") {
+		for part := range strings.SplitSeq(rel, "/") {
 			if part == pattern {
 				return true
 			}

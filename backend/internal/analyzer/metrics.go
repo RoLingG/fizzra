@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"cmp"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -28,13 +27,13 @@ import (
 // 函数长度、参数个数需要一个真正的解析器。对每种语言都运行它对评分很关键，只限
 // Go 会让一个 Rust 项目的这几项维度缺失，而缺失和记零不是一回事
 type MetricsAnalyzer struct {
-	// complexityThreshold 是函数被报成问题的圈复杂度下限
+	// complexityThreshold 函数被报成问题的圈复杂度下限
 	complexityThreshold int
-	// functionLengthThreshold 是函数被上报的行数下限
+	// functionLengthThreshold 函数被上报的行数下限
 	functionLengthThreshold int
-	// paramThreshold 是函数被上报的参数个数下限
+	// paramThreshold 函数被上报的参数个数下限
 	paramThreshold int
-	// duplicateLineThreshold 是算作克隆的最小块行数
+	// duplicateLineThreshold 算作克隆的最小块行数
 	duplicateLineThreshold int
 
 	// snapshot 保存最近一次运行的指标。分析器每次分析都会新建实例，所以它不会在
@@ -61,10 +60,6 @@ func (a *MetricsAnalyzer) Description() string {
 func (a *MetricsAnalyzer) Category() string   { return "metrics" }
 func (a *MetricsAnalyzer) Requires() []string { return nil }
 
-func (a *MetricsAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
-}
-
 // ResultReporter 让分析器在问题之外同时贡献结构化指标
 type ResultReporter interface {
 	Metrics() MetricsSnapshot
@@ -72,7 +67,7 @@ type ResultReporter interface {
 
 // AnalyzeWithContext 对源码做一遍扫描就算出全部指标
 func (a *MetricsAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
-	fset := token.NewFileSet()
+	fileSet := token.NewFileSet()
 	syntax := metricsSyntaxFor(actx.ProjectLanguage)
 	approxRules := complexityRulesFor(actx.ProjectLanguage)
 
@@ -177,7 +172,7 @@ func (a *MetricsAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 			continue
 		}
 
-		file, err := parser.ParseFile(fset, fi.Abs, raw, parser.ParseComments)
+		file, err := parser.ParseFile(fileSet, fi.Abs, raw, parser.ParseComments)
 		if err != nil {
 			// 解析不了的文件仍然计入上面的行数统计，语法错误由编译器来报，我们
 			// 不重复报一遍
@@ -194,8 +189,8 @@ func (a *MetricsAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 				testFunctions++
 			}
 
-			start := fset.Position(fn.Pos()).Line
-			end := fset.Position(fn.End()).Line
+			start := fileSet.Position(fn.Pos()).Line
+			end := fileSet.Position(fn.End()).Line
 			body := fn.Body
 			if body == nil {
 				return true // declaration without a body (assembly stub, cgo)
@@ -286,7 +281,7 @@ func (a *MetricsAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 // Metrics 返回最近一次 AnalyzeWithContext 调用产生的快照
 func (a *MetricsAnalyzer) Metrics() MetricsSnapshot { return a.snapshot }
 
-// MetricsSnapshot 是 metrics 分析器产出的代码指标记录
+// MetricsSnapshot  metrics 分析器产出的代码指标记录
 //
 // 它与 model.Metrics 对应。这种重复是有意的，本包不能导入持久层模型，映射由
 // service 层完成
@@ -315,7 +310,7 @@ type MetricsSnapshot struct {
 	LargestFiles []FileSize `json:"largestFiles"`
 }
 
-// FileSize 是逐文件大小明细中的一项
+// FileSize 逐文件大小明细中的一项
 type FileSize struct {
 	File   string `json:"file"`
 	Lines  int    `json:"lines"`
@@ -334,7 +329,7 @@ type ComplexFunction struct {
 	Receiver   string `json:"receiver,omitempty"`
 }
 
-// DuplicateBlock 是一组完全相同的代码片段
+// DuplicateBlock 一组完全相同的代码片段
 type DuplicateBlock struct {
 	Lines   int      `json:"lines"`
 	Tokens  int      `json:"tokens"`
@@ -362,13 +357,11 @@ func cyclomaticComplexity(body *ast.BlockStmt) int {
 		case *ast.CaseClause:
 			complexity++
 		case *ast.CommClause:
-			// default 分支本身不增加判定点
 			if node.Comm != nil {
 				complexity++
 			}
 		case *ast.BinaryExpr:
-			switch node.Op {
-			case token.LAND, token.LOR: // && and ||
+			if node.Op == token.LAND || node.Op == token.LOR {
 				complexity++
 			}
 		case *ast.SelectStmt:

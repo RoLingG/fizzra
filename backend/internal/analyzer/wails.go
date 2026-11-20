@@ -76,7 +76,7 @@ var wailsRuntimeGroups = map[string]string{
 	"BrowserOpenURL":       "browser",
 }
 
-// lifecycleFuncs 是 Wails 的应用钩子
+// lifecycleFuncs  Wails 的应用钩子
 var lifecycleFuncs = map[string]bool{
 	"OnStartup":     true,
 	"OnShutdown":    true,
@@ -434,7 +434,7 @@ func compact(nodes ...ast.Node) []ast.Node {
 	return out
 }
 
-// node 是每个 AST 节点类型都满足的约束
+// node 每个 AST 节点类型都满足的约束
 type node interface {
 	ast.Node
 }

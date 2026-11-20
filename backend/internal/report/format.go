@@ -13,7 +13,7 @@ import (
  * 认得 "sarif" 而面板认不得，或者某一边忘了改后缀。
  */
 
-// Format 是报告的输出格式
+// Format 报告的输出格式
 type Format string
 
 const (
@@ -55,7 +55,7 @@ func (f Format) Ext() string {
 	}
 }
 
-// ContentType 是浏览器和工具据此识别响应体的类型
+// ContentType 浏览器和工具据此识别响应体的类型
 //
 // SARIF 用 application/json，它本身就是 JSON，规范也把它注册成这个类型，而
 // application/sarif+json 尚未被广泛识别，用标准类型能少一类「下载下来打不开」

@@ -146,7 +146,7 @@ type flagSpec struct {
 	takesValue bool
 	// valueName 是帮助里值的占位名，如 file、level
 	valueName string
-	// usage 是帮助里显示的一行说明
+	// usage 帮助里显示的一行说明
 	usage string
 	// set 把值写进 globalFlags
 	set func(f *globalFlags, value string)
@@ -368,7 +368,7 @@ func seedRules(data store.Data, cfg *config.Config, log *slog.Logger) error {
 	return nil
 }
 
-// builtinNames 是内置规则库所拥有的规则名集合
+// builtinNames 内置规则库所拥有的规则名集合
 var builtinNames = func() map[string]bool {
 	out := map[string]bool{}
 	for _, r := range rule.BuiltinRulesAsModels() {
@@ -499,7 +499,7 @@ func cmdServe(app *App, args []string) int {
 	errCh := make(chan error, 1)
 	go func() {
 		app.Log.Info("fizzra listening", "addr", addr, "mode", cfg.Server.Mode, "version", service.Version)
-		app.Log.Info("open the dashboard", "url", "http://"+addr)
+		app.Log.Info("open the dashboard", "url", "https://"+addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

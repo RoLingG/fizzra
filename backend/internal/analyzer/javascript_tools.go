@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -95,7 +94,7 @@ type oxlintReport struct {
 	NumberOfRules int `json:"number_of_rules"`
 }
 
-// oxlintInvocation 是解析好的命令加上它的前置参数
+// oxlintInvocation 解析好的命令加上它的前置参数
 type oxlintInvocation struct {
 	name string
 	args []string
@@ -143,10 +142,6 @@ func oxlintFiles(actx *Context) []string {
 		out = append(out, fi.Rel)
 	}
 	return out
-}
-
-func (a *OxlintAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *OxlintAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {

@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -60,7 +59,7 @@ type cppLocation struct {
 	Info   string `xml:"info,attr"`
 }
 
-// cppIgnoredIDs 是不指向代码缺陷的规则
+// cppIgnoredIDs 不指向代码缺陷的规则
 //
 // missingIncludeSystem 只是 cppcheck 找不到标准库头，它自己的提示里也写明不需要，
 // checkersReport 是它统计自身耗时的信息，没有位置
@@ -69,14 +68,10 @@ var cppIgnoredIDs = map[string]bool{
 	"checkersReport":       true,
 }
 
-// cppIgnoredSeverities 是不当作发现汇报的级别
+// cppIgnoredSeverities 不当作发现汇报的级别
 var cppIgnoredSeverities = map[string]bool{
 	"information": true,
 	"debug":       true,
-}
-
-func (a *CppcheckAnalyzer) Analyze(ctx context.Context, projectPath string) ([]Issue, error) {
-	return nil, nil
 }
 
 func (a *CppcheckAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
@@ -167,7 +162,7 @@ func trimToXML(out []byte) []byte {
 	return out
 }
 
-// cppcheckInvocation 是解析好的命令
+// cppcheckInvocation 解析好的命令
 type cppcheckInvocation struct {
 	name string
 }
