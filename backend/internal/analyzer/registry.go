@@ -70,12 +70,12 @@ func (a *Availability) Probe(registry *Registry) map[string]ToolStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// 能通过模块运行器调到的分析器会自报命令，这样探测反映的是扫描实际能做到
-	// 什么，而不只是 PATH 上直接有什么
+	// 能通过模块运行器调到的分析器会自报命令，
+	// 探测反映的是扫描实际能做到什么，而不是 PATH 上直接有什么
 	seen := map[string]bool{}
 	for _, factory := range registry.factoriesSnapshot() {
-		an := factory()
-		if p, ok := an.(Probeable); ok {
+		analyzer := factory()
+		if p, ok := analyzer.(Probeable); ok {
 			for _, cmd := range p.ProbeCommands() {
 				if len(cmd) == 0 || seen[cmd[0]] {
 					continue
@@ -188,7 +188,7 @@ func allUnprobed(alternatives [][]string, statuses map[string]ToolStatus) bool {
 
 // missingLabel 给出缺失项的名字，优先用用户会去搜的工具名，而不是碰巧运行它的
 // 解释器
-func missingLabel(desc Descriptor, alternatives [][]string, statuses map[string]ToolStatus) string {
+func missingLabel(desc Descriptor, alternatives [][]string) string {
 	if len(desc.Requires) > 0 {
 		return strings.Join(desc.Requires, ", ")
 	}
@@ -207,13 +207,9 @@ type AnalyzerReadiness struct {
 	Ready bool `json:"ready"`
 	// MissingTools 列出不可用的依赖项
 	MissingTools []string `json:"missingTools"`
-	// ProbeMissing 记录可用性从未被检查过，那是接线错误而不是工具缺失。界面
-	// 会区别显示
+	// ProbeMissing 记录可用性从未被检查过
 	ProbeMissing bool `json:"probeMissing,omitempty"`
-	// InstallHint 是缺失工具的安装方法，分析器知道的话
-	//
-	// 与 MissingTools 放在一起，调用方因此不必从工具名反推命令，正是那样做的
-	// 结果，让命令行给一个 npm 包建议了 go install oxlint@latest
+	// InstallHint 是缺失工具的安装方法提示
 	InstallHint string `json:"installHint,omitempty"`
 	// Languages 列出该分析器适用的语言，空表示与语言无关
 	Languages []string `json:"languages"`
@@ -242,14 +238,14 @@ func Readiness(registry *Registry, avail *Availability) []AnalyzerReadiness {
 			}
 		}
 
-		// 一旦确定分析器不可用就置位，末尾针对未探测的情况再置一次，因为从用户
-		// 角度看那样同样是不可用，尽管并没有发现什么东西缺失
+		// 一旦确定分析器不可用就置位，末尾针对未探测的情况再置一次，
+		// 因为从用户角度看那样同样是不可用，尽管并没有发现什么东西缺失
 		hint := analyzerInstallHint(registry.byName(desc.Name))
 
 		if alternatives := registry.probeAlternatives(desc.Name); len(alternatives) > 0 {
 			if !anyProbeAvailable(alternatives, statuses) {
 				item.Ready = false
-				item.MissingTools = append(item.MissingTools, missingLabel(desc, alternatives, statuses))
+				item.MissingTools = append(item.MissingTools, missingLabel(desc, alternatives))
 				item.ProbeMissing = allUnprobed(alternatives, statuses)
 				item.InstallHint = hint
 			}
@@ -261,8 +257,7 @@ func Readiness(registry *Registry, avail *Availability) []AnalyzerReadiness {
 			st, probed := statuses[tool]
 			switch {
 			case !probed:
-				// 从未探测过：如实说明而不是猜
-				// 调用方本该先调 Probe，这里让那个疏漏显形
+				// 从未探测过则如实说明原因
 				item.Ready = false
 				item.MissingTools = append(item.MissingTools, tool+" (not probed)")
 				item.ProbeMissing = true
@@ -277,11 +272,9 @@ func Readiness(registry *Registry, avail *Availability) []AnalyzerReadiness {
 		out = append(out, item)
 	}
 
-	// 不需要任何外部依赖的分析器在任何机器上都能跑，把它们排在前面，让这种
-	// 始终可用的能力显眼一些
+	// 不需要任何外部依赖的分析器把它们排在前面
 	slices.SortStableFunc(out, func(a, b AnalyzerReadiness) int {
 		// 先按是否就绪，再按名字
-		// cmp.Compare 没有 bool 重载，所以显式比较，让 true（就绪）排在前面
 		if a.Ready != b.Ready {
 			if a.Ready {
 				return -1
@@ -295,10 +288,9 @@ func Readiness(registry *Registry, avail *Availability) []AnalyzerReadiness {
 
 // ReadinessForLanguage 只返回对该语言有效的分析器的就绪情况
 //
-// Readiness 报的是「这台机器上装了哪些工具」，与项目无关。而一次扫描真正要跑的
-// 只是其中一部分，Go 工具在 JavaScript 项目上会被正常跳过，那不是缺失。
-// 把两者混在一起，界面就会在一个 TS 项目上列出十一个「缺失」的 Go / Rust / Python
-// 工具，它们本来就不该跑，列出来只会让真正缺的那一个淹掉
+// Readiness 报的是「这台机器上装了哪些工具」，与项目无关。
+// 而一次扫描真正要跑的只是其中一部分，其他语言的工具在非对应语言项目上会被正常跳过，
+// 把两者混在一起，界面过多列出缺失工具，让真正缺的工具无法一眼看出
 //
 // 所以调用方在「扫描前这个项目缺什么」这个问题上应该用这个函数，而不是 Readiness
 func ReadinessForLanguage(registry *Registry, avail *Availability, lang string) []AnalyzerReadiness {
@@ -317,11 +309,9 @@ func ReadinessForLanguage(registry *Registry, avail *Availability, lang string) 
 //
 // 这一层是必要的，因为 Availability 的探测是全局的，它看到 npx 在 PATH 上，便认为
 // biome 与 tsc 就绪，而这两个真正要跑的东西只存在于项目自己的 node_modules 里。
-// 不修正的话，预检会对一个没装 biome 的项目报告「一切就绪」，用户点下扫描才撞上
-// 「包缺失」
+// 不修正的话，预检会对一个没装 biome 的项目报告「一切就绪」，用户点下扫描才提示「工具缺失」
 //
-// 判定是双向的，ProjectScoped 说不可用就一定不可用，即使全局探测说就绪，这正是
-// 要修的那种误报
+// 判定是双向的，ProjectScoped 说不可用就一定不可用，即使全局探测说就绪
 func ReadinessInProject(registry *Registry, avail *Availability, lang, projectPath string) []AnalyzerReadiness {
 	out := ReadinessForLanguage(registry, avail, lang)
 	for i := range out {
@@ -331,16 +321,15 @@ func ReadinessInProject(registry *Registry, avail *Availability, lang, projectPa
 			continue
 		}
 		if ps.AvailableIn(projectPath) {
-			// 项目里有它能用的东西，就覆盖全局探测的否定结论。PHPStan 就靠这
-			// 一条，PATH 上没有 phpstan，但项目根目录放了 phpstan.phar，扫描
-			// 实际能跑，界面不该说不可用
+			// 项目里有它能用的东西，就覆盖全局探测的否定结论。
+			// 例如 PHPStan 就需要这一条探测
 			out[i].Ready = true
 			out[i].MissingTools = []string{}
 			out[i].ProbeMissing = false
 			out[i].InstallHint = ""
 			continue
 		}
-		// 项目的判断更具体，所以它说了算，工具没装就不可用，不管 PATH 上有什么
+		// 项目的判断更具体，工具没装就不可用，不管 PATH 上有什么
 		out[i].Ready = false
 		out[i].ProbeMissing = false
 		if len(out[i].MissingTools) == 0 {
@@ -359,9 +348,8 @@ func ReadinessInProject(registry *Registry, avail *Availability, lang, projectPa
 
 // Aggregate 合并各分析器的问题，做归一化和去重
 //
-// 去重很要紧，因为内置规则集与外部 linter 是有意重叠的（见 rule/builtin.go）。
-// 同一行以两个名字报两遍会让问题列表没法用，所以按（文件、行、规则族）取最高
-// 严重级别，并记下重叠的分析器
+// 去重很重要，因为内置规则集与外部 linter 是有意重叠的（见 rule/builtin.go）。
+// 同一行以两个名字报两遍会让问题列表没法用，所以按（文件、行、规则族）取最高严重级别，并记下重叠的分析器
 func Aggregate(results []AnalysisResult) []Issue {
 	byFingerprint := map[string]int{} // key -> index into out
 	var out []Issue
@@ -393,8 +381,7 @@ func Aggregate(results []AnalysisResult) []Issue {
 		}
 	}
 
-	// 先严重级别，再文件，再行号。cmp.Or 在第一个非零比较处就停，正好等价于
-	// 它替代的那串嵌套 if
+	// 先严重级别，再文件，再行号
 	slices.SortStableFunc(out, func(a, b Issue) int {
 		return cmp.Or(
 			cmp.Compare(severityRank(a.Severity), severityRank(b.Severity)),
@@ -407,8 +394,7 @@ func Aggregate(results []AnalysisResult) []Issue {
 
 // dedupeKey 把指向同一行、同一规则的问题合并到一起
 //
-// 规则名要做归一化，因为不同工具对同一个检查的写法不同（比如 "errcheck" 和
-// "G104" 描述的都是未处理的错误）
+// 规则名要做归一化，因为不同工具对同一个检查的写法不同（比如 "errcheck" 和 "G104" 描述的都是未处理的错误）
 func dedupeKey(i Issue) string {
 	return i.File + ":" + itoa(i.Line) + ":" + normalizeRuleFamily(i.Rule)
 }

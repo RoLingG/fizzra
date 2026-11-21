@@ -297,10 +297,8 @@ type ruffInvocation struct {
 
 // ruffCommand 定位 ruff，回退到 python -m ruff
 //
-// pip 安装常把控制台脚本放在 PATH 之外（Windows 上落在
-// %APPDATA%\Python\Python3xx\Scripts），而用户有理由认为自己装好了。同时
-// 探测模块形式，能把「装了但不在 PATH 上，扫描因此静默什么都不做」变成一个
-// 能正常工作的扫描
+// pip 安装常把控制台脚本放在 PATH 之外（Windows 上落在 %APPDATA%\Python\Python3xx\Scripts）
+// 而用户有理由认为自己装好了。同时探测模块形式，能把「装了但不在 PATH 上，扫描因此静默什么都不做」变成一个能正常工作的扫描
 func ruffCommand(r Runner) (ruffInvocation, error) {
 	if path, err := LookCandidates(r, "ruff", "ruff.exe"); err == nil {
 		return ruffInvocation{name: path}, nil
@@ -316,9 +314,8 @@ func ruffCommand(r Runner) (ruffInvocation, error) {
 
 // parseRuffJSONLines 每行解析一条发现，跳过不是 JSON 的行
 //
-// 跳过条数返回给调用方而不是在这里记日志，由调用方决定怎么处理，少量非 JSON
-// 行是正常的（ruff 会在前面打印警告），但整个文件都不是 JSON 就说明解析器错了，
-// 静默会掩盖这一点
+// 跳过条数返回给调用方而不是在这里记日志，由调用方决定怎么处理，少量非 JSON 行是正常的（ruff 会在前面打印警告）
+// 但整个文件都不是 JSON 就说明解析器错了，静默会掩盖这一点
 func parseRuffJSONLines(out []byte, snippets *SnippetReader) (issues []Issue, skipped int) {
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	// 发现可能带着源代码行，所以把默认的 64KiB 上限调高
@@ -363,8 +360,8 @@ func parseRuffJSONLines(out []byte, snippets *SnippetReader) (issues []Issue, sk
 // 行，content 给出替换成什么。这覆盖了重要的两种情形，而它们是相反的，I001
 // 重写一个块（content 是排好序的 import），F401 删掉一行（content 为空）
 //
-// 缺任何一部分就返回零值是有意为之。半成品示例比没有更糟，读者分不清「工具
-// 没有建议」和「工具的建议在转换中丢了」，然后会把空的那一半粘贴进去
+// 缺任何一部分就返回零值是有意为之。半成品示例比没有更糟，用户分不清
+// 「工具没有建议」和「工具的建议在转换中丢了」，然后会把空的那一半粘贴进去
 func ruffFix(f ruffFinding, snippets *SnippetReader) FixExample {
 	if f.Fix == nil || len(f.Fix.Edits) == 0 {
 		return FixExample{}
@@ -384,8 +381,7 @@ func ruffFix(f ruffFinding, snippets *SnippetReader) FixExample {
 		}
 		sawEdit = true
 
-		// 被该编辑替换掉的那些行。reader 为 nil（或文件读不了）时这里为空，但
-		// 下面的替换内容单看仍然值得展示
+		// 被该编辑替换掉的那些行，下面的替换内容单看仍然值得展示
 		for row := start; row <= end; row++ {
 			if line := snippets.Line(rel, row); line != "" {
 				before = append(before, line)
@@ -403,8 +399,8 @@ func ruffFix(f ruffFinding, snippets *SnippetReader) FixExample {
 		return FixExample{}
 	}
 
-	// 即使被替换的行一行都读不出来，仍要展示 ruff 会写入的替换内容，所以保留
-	// 单侧的示例。两侧全空则不值得渲染
+	// 即使被替换的行一行都读不出来，仍要展示 ruff 会写入的替换内容，所以保留单侧的示例。
+	// 两侧全空则不值得渲染
 	if len(before) == 0 && len(after) == 0 {
 		return FixExample{}
 	}
@@ -443,8 +439,8 @@ func ruffFix(f ruffFinding, snippets *SnippetReader) FixExample {
 //	A   遮蔽内置名              → warning
 //	D/ANN/N/I/W/E  风格         → info
 //
-// 前缀的判断顺序很重要，"ANN201" 以 A 开头，所以类型注解的判断必须排在
-// 遮蔽内置名之前，否则每一条缺少注解都会被报成真正的警告
+// 前缀的判断顺序很重要，"ANN201" 以 A 开头，
+// 所以类型注解的判断必须排在遮蔽内置名之前，否则每一条缺少注解都会被报成真正的警告
 func mapRuffSeverity(code string) string {
 	upper := strings.ToUpper(strings.TrimSpace(code))
 
@@ -483,11 +479,10 @@ func mapRuffSeverity(code string) string {
 	return SeverityWarning
 }
 
-// criticalRuffRules 是源自 bandit 的、严重到该占最高档的检查
+// criticalRuffRules 源自 bandit 的、严重到该占最高档的检查
 //
 // 与 Go 侧对 gosec 的处理一致，代码执行、注入和凭据泄露算 critical，安全家族里
-// 其余的是 error。一刀切地把 S 全算 critical，会让一个弱哈希警告和远程代码执行
-// 平起平坐
+// 其余的是 error。一刀切地把 S 全算 critical，会让一个弱哈希警告和远程代码执行一致评级
 var criticalRuffRules = map[string]bool{
 	"S102": true, // exec
 	"S103": true, // eval
@@ -513,8 +508,7 @@ var criticalRuffRules = map[string]bool{
 
 // adviceForRuff 为那些光看规则码不知道该怎么办的规则族给出修复提示
 //
-// 长尾规则不给建议，而不是泛泛复述消息，「修好这个问题」是噪音，而且规则自己的
-// 文档链接已经附上了
+// 长尾规则不给建议，而不是泛泛复述消息，规则自己的文档链接已经附上了
 func adviceForRuff(code string) string {
 	switch strings.ToUpper(strings.TrimSpace(code)) {
 	case "S102", "S103", "S307":
