@@ -314,13 +314,13 @@ func (a *VulnerabilityAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, erro
 		return nil, fmt.Errorf("govulncheck failed: %w", err)
 	}
 
-	return a.parse(actx, out)
+	return a.parse(out)
 }
 
 // parse 解析 govulncheck 的按行分隔的 JSON 流
 //
 // 该格式是流而不是数组，且发现通过 ID 引用 OSV 记录，所以边解析边记下 OSV
-func (a *VulnerabilityAnalyzer) parse(actx *Context, raw []byte) ([]Issue, error) {
+func (a *VulnerabilityAnalyzer) parse(raw []byte) ([]Issue, error) {
 	osvSummary := map[string]string{}
 	osvAliases := map[string][]string{}
 	var findings []vulnEntry
@@ -351,8 +351,7 @@ func (a *VulnerabilityAnalyzer) parse(actx *Context, raw []byte) ([]Issue, error
 			msg += " (" + strings.Join(aliases, ", ") + ")"
 		}
 
-		// trace 的最后一帧是本模块内的调用点，前面的帧是依赖链，
-		// 优先取带位置的帧
+		// trace 的最后一帧是本模块内的调用点，前面的帧是依赖链，优先取带位置的帧
 		trace := f.Finding.Trace
 		module, version := "", ""
 		file, line, col := "", 0, 0

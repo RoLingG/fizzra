@@ -499,7 +499,7 @@ func cmdServe(app *App, args []string) int {
 	errCh := make(chan error, 1)
 	go func() {
 		app.Log.Info("fizzra listening", "addr", addr, "mode", cfg.Server.Mode, "version", service.Version)
-		app.Log.Info("open the dashboard", "url", "https://"+addr)
+		app.Log.Info("open the dashboard", "url", "http://"+addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

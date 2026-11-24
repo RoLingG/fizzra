@@ -3,7 +3,7 @@
   "version": "0.1.8",
   "private": true,
   "type": "module",
-  "description": "Web dashboard for Fizzra — lightweight code quality review for Go/Wails projects",
+  "description": "Web dashboard for Fizzra — lightweight code quality review for Go/Wails or other language projects",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build && npm run smoke:bundle && npm run check:render && npm run check:theme",

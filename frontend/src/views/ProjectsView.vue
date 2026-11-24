@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import { projectApi, reportError, systemApi } from '@/api/client'
@@ -264,6 +264,24 @@ function isScanning(p: ProjectSummary): boolean {
   return st === 'pending' || st === 'running'
 }
 
+// 引擎推的 stage 是带空格的英文短语，分析器阶段则是工具名。前者走翻译表，
+// 后者原样显示：工具名就是用户要去搜的东西，翻译了反而找不到
+const scanStageKeys: Record<string, string> = {
+  starting: 'scanStageStarting',
+  'preparing sources': 'scanStagePreparing',
+  'indexing files': 'scanStageIndexing',
+  'saving results': 'scanStageSaving',
+  scoring: 'scanStageScoring',
+}
+
+function scanStageText(p: ProjectSummary): string {
+  const stage = p.inFlight?.stage ?? ''
+  const percent = p.inFlight?.progress ?? 0
+  const key = scanStageKeys[stage]
+  const label = key ? t(`projectsView.${key}`) : stage || t('projectsView.scanning')
+  return t('projectsView.scanProgressTip', { percent, stage: label })
+}
+
 // 缺失值不计入排序方向，用 sortable="custom" 自行排序
 type SortField = 'name' | 'language' | 'source' | 'score' | 'issues' | 'lastScan' | 'gate'
 
@@ -350,6 +368,98 @@ function onSortChange({ prop, order }: { prop: string | null; order: string | nu
 const DELETE_CONFIRM_WORD = 'DELETE'
 
 const selected = ref<ProjectSummary[]>([])
+const tableRef = ref<TableInstance>()
+
+// el-table 自己维护勾选状态，清空 selected 只是清了我们的副本，表格里的勾还在，必须让它也清一次
+function clearSelection() {
+  tableRef.value?.clearSelection()
+  selected.value = []
+}
+
+/* 批量栏的展开与收起
+ *
+ * height 从 auto 不能过渡到 0，浏览器只能直接跳到 0，看起来就是瞬间消失。
+ * 所以每次先把当前高度量成像素值，再过渡到 0（或反过来），并在过渡结束后
+ * 恢复 auto，内容变化时仍能自适应。
+ *
+ * 间距用 margin-bottom 承载而不是容器的 gap：gap 不参与过渡，高度归零后
+ * 那段空隙会留到元素被移除，形成一次多余的跳变。
+ */
+const bulkSlot = ref<HTMLElement>()
+const bulkVisible = ref(false)
+const BULK_MS = 300
+const BULK_EASE = 'cubic-bezier(.16, 1, .3, 1)'
+let bulkToken = 0
+
+async function expandBulk() {
+  const token = ++bulkToken
+  bulkVisible.value = true
+  await nextTick()
+  const el = bulkSlot.value
+  if (!el || token !== bulkToken) return
+  const h = el.getBoundingClientRect().height
+  el.style.overflow = 'hidden'
+  el.style.opacity = '0'
+  el.style.marginTop = '0px'
+  el.style.height = '0px'
+  void el.offsetHeight
+
+  el.style.transition = `height ${BULK_MS}ms ${BULK_EASE}, margin-top ${BULK_MS}ms ${BULK_EASE}, opacity 200ms ${BULK_EASE}`
+  requestAnimationFrame(() => {
+    el.style.height = h + 'px'
+    el.style.marginTop = ''
+    el.style.opacity = '1'
+  })
+
+  const done = (e: TransitionEvent) => {
+    if (e.propertyName !== 'height') return
+    el.removeEventListener('transitionend', done)
+    if (token !== bulkToken) return
+    el.style.height = ''
+    el.style.overflow = ''
+    el.style.marginTop = ''
+  }
+  el.addEventListener('transitionend', done)
+}
+
+function collapseBulk() {
+  const token = ++bulkToken
+  const el = bulkSlot.value
+  if (!el) return
+  const h = el.getBoundingClientRect().height
+  const mt = parseFloat(getComputedStyle(el).marginTop) || 0
+
+  el.style.height = h + 'px'
+  el.style.marginTop = mt + 'px'
+  el.style.overflow = 'hidden'
+  void el.offsetHeight
+
+  el.style.transition = `height ${BULK_MS}ms ${BULK_EASE}, margin-top ${BULK_MS}ms ${BULK_EASE}, opacity 200ms ${BULK_EASE}`
+  requestAnimationFrame(() => {
+    el.style.height = '0px'
+    el.style.marginTop = '0px'
+    el.style.opacity = '0'
+  })
+  const done = (e: TransitionEvent) => {
+    if (e.propertyName !== 'height') return
+    el.removeEventListener('transitionend', done)
+    if (token !== bulkToken) return
+    bulkVisible.value = false
+    el.style.height = ''
+    el.style.marginTop = ''
+    el.style.overflow = ''
+    el.style.opacity = ''
+  }
+  el.addEventListener('transitionend', done)
+}
+
+watch(
+  () => selected.value.length > 0,
+  (has) => {
+    if (has) expandBulk()
+    else collapseBulk()
+  },
+)
 const deleting = ref(false)
 
 function onSelectionChange(rows: ProjectSummary[]) {
@@ -385,7 +495,7 @@ async function removeSelected() {
         t('projectsView.deletedManyPartial', { done: deleted.length, total: rows.length }),
       )
     }
-    selected.value = []
+    clearSelection()
     await load()
   } catch (error) {
     reportError(error, t('errors.deleteProject'))
@@ -417,10 +527,16 @@ useScanEvents(
     const target = projects.value.find((p) => p.id === ev.projectId)
     if (!target) return
     if (!target.inFlight) {
-      target.inFlight = { ...target.latest, status: ev.status, progress: ev.progress } as Analysis
+      target.inFlight = {
+        ...target.latest,
+        status: ev.status,
+        progress: ev.progress,
+        stage: ev.stage,
+      } as Analysis
     } else {
       target.inFlight.status = ev.status
       target.inFlight.progress = ev.progress
+      target.inFlight.stage = ev.stage
     }
   },
   () => {
@@ -443,24 +559,29 @@ onMounted(load)
       </el-button>
     </div>
 
-    <div v-if="selected.length" class="bulk-bar">
-      <span class="muted">{{ t('projectsView.selectedCount', { count: selected.length }) }}</span>
-      <el-button size="small" text @click="selected = []">
-        {{ t('projectsView.clearSelection') }}
-      </el-button>
-      <el-button
-        type="danger"
-        size="small"
-        :icon="'Delete'"
-        :loading="deleting"
-        @click="removeSelected"
-      >
-        {{ t('projectsView.deleteSelected') }}
-      </el-button>
+    <div v-show="bulkVisible" ref="bulkSlot" class="bulk-slot">
+      <div class="bulk-bar">
+        <span class="muted">{{ t('projectsView.selectedCount', { count: selected.length }) }}</span>
+        <div class="bulk-actions">
+          <el-button size="small" @click="clearSelection">
+            {{ t('projectsView.clearSelection') }}
+          </el-button>
+          <el-button
+            type="danger"
+            size="small"
+            :icon="'Delete'"
+            :loading="deleting"
+            @click="removeSelected"
+          >
+            {{ t('projectsView.deleteSelected') }}
+          </el-button>
+        </div>
+      </div>
     </div>
 
     <div v-reveal>
       <el-table
+        ref="tableRef"
         v-loading="loading"
         :data="sortedProjects"
         row-key="id"
@@ -517,6 +638,7 @@ onMounted(load)
         :label="t('projectsView.colScore')"
         prop="score"
         width="80"
+        align="center"
         sortable="custom"
       >
         <template #default="{ row }">
@@ -531,6 +653,7 @@ onMounted(load)
         :label="t('projectsView.colGate')"
         prop="gate"
         width="88"
+        align="center"
         sortable="custom"
       >
         <template #default="{ row }">
@@ -557,7 +680,8 @@ onMounted(load)
       <el-table-column
         :label="t('projectsView.colIssues')"
         prop="issues"
-        width="72"
+        width="84"
+        align="center"
         sortable="custom"
       >
         <template #default="{ row }">
@@ -570,13 +694,18 @@ onMounted(load)
         :label="t('projectsView.colLastScan')"
         prop="lastScan"
         width="110"
+        align="center"
         sortable="custom"
       >
         <template #default="{ row }">
-          <span v-if="isScanning(row)" class="scanning">
-            <span class="scanning-dot" />
-            {{ t('projectsView.scanning') }}
-          </span>
+          <el-tooltip v-if="isScanning(row)" placement="top" :show-after="200">
+            <template #content>
+              {{ scanStageText(row) }}
+            </template>
+            <span class="scan-dots" role="status" :aria-label="scanStageText(row)">
+              <span /><span /><span />
+            </span>
+          </el-tooltip>
           <span v-else-if="row.lastFailed && !row.latest" class="scan-failed">
             {{ t('projectsView.scanFailed') }}
           </span>
@@ -586,7 +715,7 @@ onMounted(load)
         </template>
       </el-table-column>
 
-      <el-table-column :label="t('issue.colActions')" width="104">
+      <el-table-column :label="t('issue.colActions')" width="104" header-align="center">
         <template #default="{ row }">
           <div class="actions">
             <el-button
@@ -874,7 +1003,17 @@ onMounted(load)
 .projects {
   display: flex;
   flex-direction: column;
-  gap: var(--s-md);
+}
+
+/* 间距用 margin 而不是 gap：gap 不参与动画，批量栏高度归零后那段空隙
+   要等元素移除才消失，看起来就是收完之后又顿一下 */
+.projects > * + * {
+  margin-top: var(--s-md);
+}
+
+/* 批量栏的前后间距由它自己持有，随高度一起收缩 */
+.bulk-slot {
+  margin-top: var(--s-md);
 }
 
 .head {
@@ -891,15 +1030,23 @@ onMounted(load)
 .bulk-bar {
   display: flex;
   align-items: center;
-  gap: var(--s-xs);
+  gap: var(--s-sm);
   padding: var(--s-xs) var(--s-sm);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg);
 }
 
-.bulk-bar .el-button:last-child {
+.bulk-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-xs);
+}
+
+/* Element Plus 给相邻按钮默认 12px 左边距，这里用 gap 控制，去掉它 */
+.bulk-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .intro {
@@ -1352,13 +1499,50 @@ onMounted(load)
   font-size: 13px;
 }
 
-/* 扫描中：一个呼吸的圆点加文字，比纯文字更能表达「正在进行」 */
-.scanning {
+/* 扫描中：三点跳动，进度和当前分析器都放在 tooltip 里
+   不加进度条是因为 0% 到 10% 之间条长时间是空的，看起来像卡住 */
+.scan-dots {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--sev-warning);
+  gap: 3px;
+  padding: 4px 0;
+  cursor: default;
+}
+
+.scan-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-soft);
+  animation: scan-bounce 1.2s ease-in-out infinite;
+}
+
+.scan-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.scan-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes scan-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-dots span {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 .scan-failed {
@@ -1367,27 +1551,15 @@ onMounted(load)
   cursor: help;
 }
 
-.scanning-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 1.4s ease-in-out infinite;
+:deep(.el-table th.is-center .cell) {
+  padding-left: 20px;
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.25;
-  }
+:deep(.el-table th.is-center .caret-wrapper) {
+  width: 14px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .scanning-dot {
-    animation: none;
-  }
+:deep(.el-table th.is-center .sort-caret) {
+  left: 4px;
 }
 </style>

@@ -111,6 +111,8 @@ export interface Analysis {
   path: string
   analyzers: string[] | null
   progress: number
+  /** 运行中的当前阶段或分析器名，只由 SSE 事件填充，接口返回的分析记录里没有 */
+  stage?: string
   startedAt: string
   finishedAt: string | null
   durationMs: number

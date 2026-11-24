@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import { reportError, ruleApi } from '@/api/client'
@@ -25,6 +25,26 @@ const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
 
 const patternError = ref('')
+
+const confirmOpen = ref(false)
+const confirmTitle = ref('')
+const confirmBody = ref('')
+let confirmResolve: ((ok: boolean) => void) | null = null
+
+function askConfirm(title: string, body: string): Promise<boolean> {
+  confirmTitle.value = title
+  confirmBody.value = body
+  confirmOpen.value = true
+  return new Promise((resolve) => {
+    confirmResolve = resolve
+  })
+}
+
+function settleConfirm(ok: boolean) {
+  confirmOpen.value = false
+  confirmResolve?.(ok)
+  confirmResolve = null
+}
 
 const form = reactive({
   name: '',
@@ -194,19 +214,11 @@ async function toggle(rule: Rule) {
 }
 
 async function remove(rule: Rule) {
-  try {
-    await ElMessageBox.confirm(
-      t('rulesView.deleteBody', { name: rule.name }),
-      t('rulesView.deleteTitle'),
-      {
-        confirmButtonText: t('common.delete'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning',
-      },
-    )
-  } catch {
-    return
-  }
+  const ok = await askConfirm(
+    t('rulesView.deleteTitle'),
+    t('rulesView.deleteBody', { name: rule.name }),
+  )
+  if (!ok) return
 
   try {
     await ruleApi.remove(rule.id)
@@ -454,6 +466,50 @@ onMounted(load)
         <el-button @click="dialogOpen = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="saving" @click="save">
           {{ editingId ? t('common.save') : t('rulesView.newRule') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="confirmOpen"
+      width="420px"
+      class="confirm-dialog"
+      :close-on-click-modal="false"
+      @closed="settleConfirm(false)"
+    >
+      <template #header="{ titleId, titleClass }">
+        <div class="dialog-head">
+          <span :id="titleId" :class="titleClass" class="dialog-title">{{ confirmTitle }}</span>
+          <button
+            type="button"
+            class="dialog-close"
+            :aria-label="t('common.close')"
+            @click="settleConfirm(false)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </template>
+
+      <aside class="confirm-notice">
+        <span class="confirm-notice-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="15" height="15">
+            <path d="M8 1.8 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+            <path d="M8 6.2v3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <circle cx="8" cy="11.7" r="0.95" fill="currentColor" />
+          </svg>
+        </span>
+        <span class="confirm-notice-text">{{ t('rulesView.deleteWarning') }}</span>
+      </aside>
+
+      <p class="confirm-body">{{ confirmBody }}</p>
+
+      <template #footer>
+        <el-button @click="settleConfirm(false)">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="settleConfirm(true)">
+          {{ t('common.delete') }}
         </el-button>
       </template>
     </el-dialog>
@@ -748,5 +804,41 @@ onMounted(load)
   .head {
     flex-direction: column;
   }
+}
+
+.confirm-notice {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--r-md);
+  background: var(--danger-bg);
+}
+
+.confirm-notice-mark {
+  flex: none;
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+.confirm-notice-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-body);
+}
+
+.confirm-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-body);
+}
+
+.confirm-dialog :deep(.el-dialog__body) {
+  padding: 20px 28px 0;
+}
+
+.confirm-dialog :deep(.el-dialog__footer) {
+  padding: 20px 28px 26px;
 }
 </style>

@@ -44,7 +44,7 @@ func (r *ExecRunner) WithEnv(kv ...string) *ExecRunner {
 	return r
 }
 
-// LookPath 检查某个二进制是否存在，并把结果缓存下来
+// LookPath 检查某个二进制文件是否存在，并把结果缓存下来
 // 一次运行里分析器会反复探测同一批工具
 func (r *ExecRunner) LookPath(name string) (string, error) {
 	r.mu.Lock()
@@ -161,13 +161,12 @@ func (r *ExecRunner) Run(ctx context.Context, dir, name string, args ...string) 
 	return out, exitErr
 }
 
-// IsToolMissing 报告某个错误是否表示「二进制没装」，那是跳过条件而不是失败
+// IsToolMissing 报告某个错误是否表示「二进制没装」，这是跳过条件而不是失败
 func IsToolMissing(err error) bool {
 	if err == nil {
 		return false
 	}
-	var ee *ExitError
-	if errors.As(err, &ee) {
+	if _, ok := errors.AsType[*ExitError](err); ok {
 		return false // the tool ran but failed
 	}
 	return errors.Is(err, exec.ErrNotFound) ||
@@ -177,8 +176,7 @@ func IsToolMissing(err error) bool {
 
 // IsTimeout 报告某个错误是否由超出超时引起
 func IsTimeout(err error) bool {
-	var ee *ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*ExitError](err); ok {
 		return ee.TimedOut
 	}
 	return errors.Is(err, context.DeadlineExceeded)

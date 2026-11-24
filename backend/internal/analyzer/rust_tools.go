@@ -45,8 +45,7 @@ func (a *ClippyAnalyzer) InstallHint() string {
 //
 // 诊断嵌在下一层，位于 message 之下，cargo 把 rustc 自己的记录包了一层，以便
 // 附上 reason 和 package_id。从顶层读这些字段会让每一行都解出空结构体，这是
-// 静默的零发现 bug 而不是解析错误，测试里的样本因此取自真实报文而不是手写
-// 简化版
+// 静默的零发现 bug 而不是解析错误，测试里的样本因此取自真实报文而不是手写简化版
 type clippyRecord struct {
 	// Reason 用来区分诊断（compiler-message）和共用同一流的构建进度
 	// （compiler-artifact、build-finished）
@@ -81,8 +80,7 @@ type clippySpan struct {
 	IsPrimary   bool   `json:"is_primary"`
 
 	// Text 是该 span 覆盖的源码，SuggestedReplacement 是 rustc 建议替换成的内容
-	// 两者对修复示例都很关键，它们是直接来自工具的一对修改前后，都不必自己
-	// 拼凑
+	// 两者对修复示例都很关键，它们是直接来自工具的一对修改前后，都不必自己拼凑
 	//
 	// Text 是数组，因为 span 可能跨越宏展开，此时 rustc 会按展开层级各报一条，
 	// 最外层在前。只有第一条是实际写下的代码，其余是宏内部的东西
@@ -104,8 +102,7 @@ func (a *ClippyAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 	//
 	// Tauri 应用的 Cargo.toml 在 src-tauri/ 下，前端在根目录，所以要求根目录
 	// 必须有清单文件会让 clippy 恰好跳过这类项目，而本分析器正是为它们而加的。
-	// cargo 还必须在放着清单文件的目录里运行，不能在仓库根目录，否则它找不到
-	// 任何包
+	// cargo 还必须在放着清单文件的目录里运行，不能在仓库根目录，否则它找不到任何包
 	crateDir, ok := findRustCrate(actx)
 	if !ok {
 		return nil, ErrToolUnavailable("clippy (no Cargo.toml found)")
@@ -143,15 +140,13 @@ func (a *ClippyAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 // 可能有多个 crate，仓库也可能把工具放在子目录里。只考虑前两层，更深的清单
 // 属于 vendored 依赖而不是本项目，构建产物目录则跳过
 //
-// 返回的路径是绝对路径，因为 cargo 要拿它当工作目录，相对路径会被按进程自身
-// 的目录解析
+// 返回的路径是绝对路径，因为 cargo 要拿它当工作目录，相对路径会被按进程自身的目录解析
 func findRustCrate(actx *Context) (string, bool) {
 	if actx.Files.Exists("Cargo.toml") {
 		return actx.ProjectPath, true
 	}
 
-	// 只看直接子目录，优先 src-tauri，这样即使旁边还放着别的 crate 也能认出
-	// Tauri 的布局
+	// 只看直接子目录，优先 src-tauri，这样即使旁边还放着别的 crate 也能认出 Tauri 的布局
 	candidates := []string{"src-tauri"}
 	if entries, err := os.ReadDir(actx.ProjectPath); err == nil {
 		for _, e := range entries {
@@ -197,8 +192,7 @@ func crateManifest(crateDir, projectRoot, name string) string {
 // stderrHasDiagnostics 报告某个 ExitError 是否带有可解析的输出
 //
 // clippy 把 JSON Lines 写到 stderr，所以诊断在被包装的错误里而不是返回的
-// stdout 里。完全没有 stderr 的失败是真正的失败（cargo 缺失、没有清单文件），
-// 不是发现了问题
+// stdout 里。完全没有 stderr 的失败是真正的失败（cargo 缺失、没有清单文件），不是发现了问题
 func stderrHasDiagnostics(err error) bool {
 	var e *ExitError
 	if !errors.As(err, &e) {
@@ -240,8 +234,7 @@ func parseClippyJSONLines(out []byte, snippets *SnippetReader) (issues []Issue, 
 
 		span, ok := primarySpan(msg)
 		if !ok {
-			// 没有源码位置的诊断（比如 crate 级错误）无处可报。跳过它比硬挂到
-			// 一个不相干的文件上要诚实
+			// 没有源码位置的诊断（比如 crate 级错误）无处可报，直接跳过
 			skipped++
 			continue
 		}
@@ -276,8 +269,7 @@ func parseClippyJSONLines(out []byte, snippets *SnippetReader) (issues []Issue, 
 // （比如「考虑改用迭代器」）不能被包装成修改前后对照
 func clippyFix(msg clippyMessage) FixExample {
 	// 只有 MachineApplicable 的建议是编译器有把握的改写。MaybeIncorrect 和
-	// HasPlaceholders 都还是草稿，把其中之一当成修正后的代码展示，等于断言
-	// 一件 rustc 明确不肯断言的事
+	// HasPlaceholders 都还是草稿，把其中之一当成修正后的代码展示，等于断言一件 rustc 明确不肯断言的事
 	for _, child := range msg.Children {
 		for _, s := range child.Spans {
 			if s.SuggestedReplacement == nil || s.SuggestionApplicability != "MachineApplicable" {
@@ -335,8 +327,7 @@ func spanText(s clippySpan) string {
 // primarySpan 挑出要上报的 span
 //
 // 优先顺序，诊断自身的 primary span，然后是 children 里的 primary span。lint
-// 的父 span 常常是整个外层条目，报它会把发现落在 fn 那一行，而不是真正出错
-// 的表达式上
+// 的父 span 常常是整个外层条目，报它会把发现落在 fn 那一行，而不是真正出错的表达式上
 func primarySpan(msg clippyMessage) (clippySpan, bool) {
 	for _, s := range msg.Spans {
 		if s.IsPrimary && s.FileName != "" {
@@ -371,8 +362,7 @@ func primarySpan(msg clippyMessage) (clippySpan, bool) {
 // clippyRuleCode 提取 lint 名
 //
 // 不同分组里可能有同名的 lint，所以取能保留下来的是标识符本身，没有 code 的
-// 诊断（clippy 透出的普通编译错误）退回用它的 level，这样问题列表读起来仍然
-// 合理
+// 诊断（clippy 透出的普通编译错误）退回用它的 level，这样问题列表读起来仍然合理
 func clippyRuleCode(msg clippyMessage) string {
 	if msg.Code != nil && msg.Code.Code != "" {
 		return msg.Code.Code
@@ -399,8 +389,8 @@ func mapClippySeverity(level string) string {
 // clippyDocURL 给出某个 lint 的文档链接
 //
 // clippy 的 lint 索引里只有它自己的 lint，rustc 的 lint（clippy 既然跑编译器
-// 也会带出来）不在里面，指向错误索引的链接比没有链接更糟。clippy:: 前缀就是
-// 区分标志，像 unused_variables 这样的裸名属于 rustc
+// 也会带出来）不在里面，指向错误索引的链接比没有链接更糟。clippy:: 前缀就是区分标志，
+// 像 unused_variables 这样的裸名属于 rustc
 func clippyDocURL(code string) string {
 	if !strings.HasPrefix(code, "clippy::") {
 		return ""
@@ -412,8 +402,7 @@ func clippyDocURL(code string) string {
 //
 // 它是 gofmt 分析器的直接对应物，也是 Rust 工具链自带的仅两个检查工具中的
 // 第二个，生态里其余的（audit、deny、geiger、udeps）都要单独安装。值得接入的
-// 原因是，在已经有工具链的机器上它不需要额外安装，而每个 Rust 开发者都是从那
-// 里起步的
+// 原因是，在已经有工具链的机器上它不需要额外安装，而每个 Rust 开发者都是从那里起步的
 type RustfmtAnalyzer struct{ rustOnly }
 
 // NewRustfmtAnalyzer 构造该分析器
@@ -464,16 +453,16 @@ func (a *RustfmtAnalyzer) AnalyzeWithContext(actx *Context) ([]Issue, error) {
 
 // parseRustfmtDiff 提取 rustfmt 会改动的文件
 //
-// 输出是每个文件一段 unified diff，由 `Diff in <path>:<line>:` 一行引出。路径是
-// 绝对路径，Windows 上还带 \?\ 前缀，上报前要转成相对 crate 的路径。只取这个头，
+// 输出是每个文件一段 unified diff，由 `Diff in <path>:<line>:` 一行引出。
+// 路径是绝对路径，Windows 上还带 \?\ 前缀，上报前要转成相对 crate 的路径。只取这个头，
 // diff 正文本身就是改法，重复到消息里只会淹没这条发现
 func parseRustfmtDiff(out []byte, crateDir string) []Issue {
 	var issues []Issue
 	seen := map[string]bool{}
 
 	for _, line := range splitLines(string(out)) {
-		// rustfmt 会给 diff 上色，头部目前是纯文本，但仍然剥掉转义，以防日后
-		// 的版本连头部也上色
+		// rustfmt 会给 diff 上色，头部目前是纯文本，但仍然剥掉转义，
+		// 以防日后的版本连头部也上色
 		clean := stripANSI(strings.TrimSpace(line))
 		if !strings.HasPrefix(clean, "Diff in ") {
 			continue
@@ -551,8 +540,7 @@ func logRustfmtResult(actx *Context, issues []Issue) {
 
 // stripANSI 去掉终端颜色转义
 //
-// rustfmt 会给 diff 输出上色，而文件路径里夹着原始转义序列会让上报的位置无法
-// 使用
+// rustfmt 会给 diff 输出上色，而文件路径里夹着原始转义序列会让上报的位置无法使用
 func stripANSI(s string) string {
 	if !strings.Contains(s, "\x1b[") {
 		return s
@@ -750,8 +738,7 @@ func (a *CargoAuditAnalyzer) auditIssue(crateDir string, actx *Context, v auditE
 	}
 }
 
-// auditAdvice 说明该做什么。对直接依赖的通告，就是给出修复它的那个版本，因为
-// 升级本身就是全部解法
+// auditAdvice 说明该做什么，对直接依赖的通告，给出修复它的那个版本，因为升级本身就是全部解法
 //
 // 对传递依赖，建议必须不同，读者升级不了一个他并没直接依赖的包，只报版本号
 // 是一条他没法照做的指示。改成给出依赖链，指向他真正能动的那一环
@@ -793,9 +780,8 @@ func auditAdvice(informational *string, aliases, patched []string, origin string
 // mapAuditSeverity 根据通告的类别推导等级
 //
 // RustSec 不给严重级别，所以类别是现有最接近的信号。它们不能混为一谈，网络库
-// 里的内存破坏可能是远程代码执行，而「无人维护」的通知只是个维护问题。把所有
-// 通告都当 critical 和都不当 critical 一样错，所以映射是显式的，只对可能意味着
-// 代码执行的类别往上偏
+// 里的内存破坏可能是远程代码执行，而「无人维护」的通知只是个维护问题。把所有通告都当 critical
+// 和都不当 critical 一样错，所以映射是显式的，只对可能意味着代码执行的类别往上偏
 func mapAuditSeverity(categories []string, informational *string) string {
 	// 信息类通告无论还说了什么，都绝不是漏洞
 	if informational != nil && *informational != "" {
