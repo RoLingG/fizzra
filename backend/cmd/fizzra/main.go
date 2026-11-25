@@ -60,6 +60,13 @@ func run() int {
 		return 0
 	}
 
+	// 只带了全局标志、没写子命令时，报 unknown command "" 太生硬，也看不出是
+	// 漏了命令还是拼错了
+	if command == "" {
+		printUsage()
+		return 2
+	}
+
 	cmd, ok := lookupCommand(command)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
@@ -470,8 +477,11 @@ func mergeConfigRule(r *model.Rule, rc config.RuleConfig) {
 		r.Enabled = *rc.Enabled
 	}
 	r.Builtin = r.Builtin || rc.Builtin
-	r.RequireLoop = rc.RequireLoop
-	r.ForbidInLoop = rc.ForbidInLoop
+	// 这两个字段在 config.RuleConfig 里是普通 bool，零值分不清「没写」和「写 false」。
+	// 直接赋值会让只改 severity 的覆盖把内置规则的循环作用域抹掉，所以取并集止血；
+	// 要支持显式关闭需把 internal/config 对应字段改成 *bool（模块 2）
+	r.RequireLoop = r.RequireLoop || rc.RequireLoop
+	r.ForbidInLoop = r.ForbidInLoop || rc.ForbidInLoop
 }
 
 // ---------------------------------------------------------------------------
@@ -487,40 +497,10 @@ func cmdServe(app *App, args []string) int {
 		return 0
 	}
 
-	addr := cfg.Addr()
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--addr", "--host":
-			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "flag %s requires a value\n", args[i])
-				return 2
-			}
-			i++
-			if isPort(args[i]) {
-				addr = net.JoinHostPort(cfg.Server.Host, args[i])
-			} else if host, port, err := net.SplitHostPort(args[i]); err == nil {
-				addr = net.JoinHostPort(host, port)
-			} else {
-				fmt.Fprintf(os.Stderr, "invalid address %q\n", args[i])
-				return 2
-			}
-		case "--port", "-p":
-			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "flag %s requires a value\n", args[i])
-				return 2
-			}
-			i++
-			if !isPort(args[i]) {
-				fmt.Fprintf(os.Stderr, "invalid port %q; must be 1-65535\n", args[i])
-				return 2
-			}
-			addr = net.JoinHostPort(cfg.Server.Host, args[i])
-		default:
-			// 以前这里静默忽略拼错的参数，服务照常在默认端口起来，
-			// 用户以为自己的 --port 生效了
-			fmt.Fprintf(os.Stderr, "unknown argument %q\n\n%s\n", args[i], serveUsage)
-			return 2
-		}
+	addr, err := parseServeAddr(cfg, args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n\n%s\n", err, serveUsage)
+		return 2
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -615,6 +595,55 @@ func isPort(s string) bool {
 		return false
 	}
 	return n >= 1 && n <= 65535
+}
+
+// parseServeAddr 把 --addr / --host / --port 解析成可监听地址
+//
+// 抽成独立函数是为了能单测：端口校验错到监听时才炸，等于把一个配置错误推迟成
+// 一次启动失败，而 127.0.0.1:99999 这种地址本来一眼就能认出来
+func parseServeAddr(cfg *config.Config, args []string) (string, error) {
+	addr := cfg.Addr()
+	defaultPort := strconv.Itoa(cfg.Server.Port)
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--addr", "--host":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("flag %s requires a value", args[i])
+			}
+			i++
+			val := args[i]
+			switch {
+			case isPort(val):
+				addr = net.JoinHostPort(cfg.Server.Host, val)
+			case strings.Contains(val, ":"):
+				// 带冒号的必须拆得开，且端口合法。不校验的话
+				// 127.0.0.1:abc 会一路走到监听才失败
+				host, port, err := net.SplitHostPort(val)
+				if err != nil || !isPort(port) {
+					return "", fmt.Errorf("invalid address %q: port must be 1-65535", val)
+				}
+				addr = net.JoinHostPort(host, port)
+			case val != "":
+				// 裸 host，沿用配置里的端口。--host 0.0.0.0 是常见写法
+				addr = net.JoinHostPort(val, defaultPort)
+			default:
+				return "", fmt.Errorf("invalid address %q", val)
+			}
+		case "--port", "-p":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("flag %s requires a value", args[i])
+			}
+			i++
+			if !isPort(args[i]) {
+				return "", fmt.Errorf("invalid port %q; must be 1-65535", args[i])
+			}
+			addr = net.JoinHostPort(cfg.Server.Host, args[i])
+		default:
+			return "", fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	return addr, nil
 }
 
 func stringOr(v, fallback string) string {

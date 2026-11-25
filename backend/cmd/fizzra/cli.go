@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rolingg/fizzra/backend/internal/model"
 	"github.com/rolingg/fizzra/backend/internal/quality"
@@ -32,7 +35,6 @@ type cliOptions struct {
 	hasMinScore bool
 	FailOn      []string
 	Quiet       bool
-	NoSave      bool
 	Timeout     time.Duration
 	// Lang 是报告框架文案的语言，取值 en / zh，空表示用默认的 en
 	Lang string
@@ -118,8 +120,6 @@ func parseCommonFlags(args []string) (cliOptions, error) {
 			opts.Quiet = true
 		case arg == "--offline":
 			opts.Offline = true
-		case arg == "--no-save":
-			opts.NoSave = true
 		case arg == "--help" || arg == "-h":
 			return opts, errHelp
 		case strings.HasPrefix(arg, "-"):
@@ -179,7 +179,9 @@ func resolveTarget(ctx context.Context, app *App, opts cliOptions) (*model.Proje
 			if p.LocalPath == "" || !samePath(p.LocalPath, abs) {
 				continue
 			}
-			if p.Language != language {
+			// Kind 也要比对：项目加了 wails.json 之后 language 仍是 go，
+			// 但 kind 从 go 变成 wails，只比语言会漏掉这次升级
+			if p.Language != language || p.Kind != kind {
 				updated, err := app.Svc.SetLanguage(ctx, p.ID, language, kind)
 				if err != nil {
 					// 不致命：扫描仍可用已存的值继续，但要说明，而不是静默扫错语言
@@ -433,6 +435,26 @@ func triggerFor(opts cliOptions) string {
 // fizzra scan
 // ---------------------------------------------------------------------------
 
+// validateScanFormat 在开跑之前拦下非法组合
+//
+// 放在扫描之前而不是 switch 的 default 里：一次扫描可能要跑十几分钟，让用户
+// 等完才发现 --format 拼错了没有意义
+func validateScanFormat(format, output string) error {
+	switch format {
+	case "", "text":
+		// text 只有终端摘要，没有文件可写。静默忽略 --output 会让用户以为报告
+		// 生成了，所以这里直接拒绝
+		if output != "" {
+			return fmt.Errorf("--output has no effect with --format text; use json, html or sarif to write a file")
+		}
+		return nil
+	case "json", "html", "sarif":
+		return nil
+	default:
+		return fmt.Errorf("unknown format %q (use text, json, html or sarif)", format)
+	}
+}
+
 func cmdScan(app *App, args []string) int {
 	opts, err := parseCommonFlags(args)
 	if err != nil {
@@ -443,8 +465,12 @@ func cmdScan(app *App, args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n\n%s\n", err, scanUsage)
 		return 2
 	}
+	if err := validateScanFormat(opts.Format, opts.Output); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	project, analysis, runErr := runScan(ctx, app, opts)
@@ -505,9 +531,18 @@ Examples:
 
 // printScanSummary 渲染人类可读的命令行输出
 func printScanSummary(project *model.Project, analysis *model.Analysis, issues []model.Issue, quiet bool) {
+	printScanSummaryTo(os.Stdout, project, analysis, issues, quiet)
+}
+
+// printScanSummaryTo 让调用方指定目的地
+//
+// ci 在机读报告写往 stdout 时必须把摘要改投 stderr，否则 jq / SARIF 解析器
+// 看到的是被人类文案掺过的文档
+func printScanSummaryTo(w io.Writer, project *model.Project, analysis *model.Analysis, issues []model.Issue, quiet bool) {
 	if !quiet {
-		fmt.Printf("\n  %s\n", project.Name)
-		fmt.Printf("  %s\n\n", strings.Repeat("─", len(project.Name)+2))
+		fmt.Fprintf(w, "\n  %s\n", project.Name)
+		// 横线按显示宽度而不是字节数：中文项目名按字节算会被放大三倍
+		fmt.Fprintf(w, "  %s\n\n", strings.Repeat("─", utf8.RuneCountInString(project.Name)+2))
 	}
 
 	// 不完整的扫描在数字之前告知，而不是之后
@@ -519,68 +554,61 @@ func printScanSummary(project *model.Project, analysis *model.Analysis, issues [
 	// 「失败」和「跳过」是两件不同的事，措辞也不同。失败的分析器坏了，跳过的分析器
 	// 正确地拒绝了，多数是因为工具没装。对着一个缺失的 linter 说「失败」，会把读者
 	// 引去找一场根本没发生的崩溃
+	//
+	// 两者可以同时存在：一部分分析器崩了、另一部分跳过了。它们来自不同的切片，
+	// 所以分开遍历，不能把跳过嵌在「有失败」的条件里
 	if analysis.Incomplete {
 		if len(analysis.FailedAnalyzers) > 0 {
-			verb := "failed"
-			if analysis.NoAnalyzerRan {
-				verb = "skipped"
-			}
-			fmt.Printf("  !! INCOMPLETE — %d analyzer(s) %s: %s\n",
-				len(analysis.FailedAnalyzers), verb, strings.Join(analysis.FailedAnalyzers, ", "))
-			for i, reason := range analysis.FailureReasons {
-				if i >= 2 {
-					fmt.Printf("     … and %d more\n", len(analysis.FailureReasons)-2)
-					break
-				}
-				// 对跳过标记来说，原因里已经带了分析器名，所以只在不会重复时才
-				// 加前缀
-				if strings.HasPrefix(reason, analysis.FailedAnalyzers[i]+":") {
-					fmt.Printf("     %s\n", reason)
-					continue
-				}
-				fmt.Printf("     %s: %s\n", analysis.FailedAnalyzers[i], reason)
-			}
+			fmt.Fprintf(w, "  !! INCOMPLETE — %d analyzer(s) failed: %s\n",
+				len(analysis.FailedAnalyzers), strings.Join(analysis.FailedAnalyzers, ", "))
+			printReasons(w, analysis.FailedAnalyzers, analysis.FailureReasons)
 		}
-		fmt.Printf("     The score below is computed from partial results and understates\n")
-		fmt.Printf("     the real issue count. Fix the failure and re-run before trusting it.\n\n")
+		if len(analysis.SkippedAnalyzers) > 0 {
+			fmt.Fprintf(w, "  !! INCOMPLETE — %d analyzer(s) skipped: %s\n",
+				len(analysis.SkippedAnalyzers), strings.Join(analysis.SkippedAnalyzers, ", "))
+			printReasons(w, analysis.SkippedAnalyzers, analysis.SkipReasons)
+		}
+		fmt.Fprintf(w, "     The score below is computed from partial results and understates\n")
+		fmt.Fprintf(w, "     the real issue count. Fix the failure and re-run before trusting it.\n\n")
 	}
 
 	score := analysis.Score
-	fmt.Printf("  Score          %.1f/100  (%s)\n", score, quality.Grade(score))
-	fmt.Printf("  Gate           %s\n", analysis.GateStatus)
+
+	fmt.Fprintf(w, "  Score          %.1f/100  (%s)\n", score, quality.Grade(score))
+	fmt.Fprintf(w, "  Gate           %s\n", analysis.GateStatus)
 	if analysis.GateReason != "" && analysis.GateStatus == model.GateFailed {
-		fmt.Printf("                 %s\n", analysis.GateReason)
+		fmt.Fprintf(w, "                 %s\n", analysis.GateReason)
 	}
-	fmt.Printf("  Issues         %d total\n", analysis.TotalIssues)
-	fmt.Printf("                 %d critical · %d error · %d warning · %d info\n",
+	fmt.Fprintf(w, "  Issues         %d total\n", analysis.TotalIssues)
+	fmt.Fprintf(w, "                 %d critical · %d error · %d warning · %d info\n",
 		analysis.CriticalIssues, analysis.ErrorIssues, analysis.WarningIssues, analysis.InfoIssues)
 
 	m := analysis.Metrics
 	if m.Files > 0 {
-		fmt.Printf("  Code           %d files · %d lines (%d code)\n", m.Files, m.Lines, m.CodeLines)
+		fmt.Fprintf(w, "  Code           %d files · %d lines (%d code)\n", m.Files, m.Lines, m.CodeLines)
 		// 复杂度来自 AST 遍历，而那只对 Go 存在。对一个从未测量过的项目打印
 		// 「avg 0.0」，读起来像「这段代码完美简单」，恰恰与已知的情况相反
 		if m.Functions > 0 {
-			fmt.Printf("  Complexity     avg %.1f · worst %d\n", m.AvgComplexity, m.MaxComplexity)
+			fmt.Fprintf(w, "  Complexity     avg %.1f · worst %d\n", m.AvgComplexity, m.MaxComplexity)
 		} else {
-			fmt.Printf("  Complexity     not measured (no AST walker for this language)\n")
+			fmt.Fprintf(w, "  Complexity     not measured (no AST walker for this language)\n")
 		}
-		fmt.Printf("  Duplication    %.1f%%\n", m.Duplication)
+		fmt.Fprintf(w, "  Duplication    %.1f%%\n", m.Duplication)
 		if m.Coverage > 0 {
-			fmt.Printf("  Coverage       %.1f%%\n", m.Coverage)
+			fmt.Fprintf(w, "  Coverage       %.1f%%\n", m.Coverage)
 		}
 	}
-	fmt.Printf("  Duration       %s\n", time.Duration(analysis.DurationMS)*time.Millisecond)
+	fmt.Fprintf(w, "  Duration       %s\n", time.Duration(analysis.DurationMS)*time.Millisecond)
 
 	if analysis.Error != "" {
-		fmt.Printf("  Note           %s\n", analysis.Error)
+		fmt.Fprintf(w, "  Note           %s\n", analysis.Error)
 	}
 
 	if quiet || len(issues) == 0 {
 		if len(issues) == 0 {
-			fmt.Printf("\n  No issues found.\n\n")
+			fmt.Fprintf(w, "\n  No issues found.\n\n")
 		} else {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 		return
 	}
@@ -605,28 +633,51 @@ func printScanSummary(project *model.Project, analysis *model.Analysis, issues [
 	shown := 0
 	for _, file := range files {
 		if shown >= maxFiles {
-			fmt.Printf("\n  … and %d more file(s). Use --format json for the full list.\n\n", len(files)-shown)
+			fmt.Fprintf(w, "\n  … and %d more file(s). Use --format json for the full list.\n\n", len(files)-shown)
 			break
 		}
 		shown++
 
 		fileIssues := byFile[file]
-		fmt.Printf("\n  %s\n", file)
+		fmt.Fprintf(w, "\n  %s\n", file)
 		const maxPerFile = 8
 		for i, issue := range fileIssues {
 			if i >= maxPerFile {
-				fmt.Printf("      … %d more in this file\n", len(fileIssues)-maxPerFile)
+				fmt.Fprintf(w, "      … %d more in this file\n", len(fileIssues)-maxPerFile)
 				break
 			}
 			loc := ""
 			if issue.Line > 0 {
 				loc = fmt.Sprintf(":%d", issue.Line)
 			}
-			fmt.Printf("      %-8s %s%s  %s\n", severityTag(issue.Severity), file, loc, truncate(issue.Message, 78))
-			fmt.Printf("               %s · %s\n", issue.Analyzer, issue.Rule)
+			fmt.Fprintf(w, "      %-8s %s%s  %s\n", severityTag(issue.Severity), file, loc, truncate(issue.Message, 78))
+			fmt.Fprintf(w, "               %s · %s\n", issue.Analyzer, issue.Rule)
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
+}
+
+// printReasons 打印与 names 对齐的原因，最多两条
+//
+// 两个切片理论上同长，但这是个只读展示函数，让一次长度错位把整段摘要打成 panic
+// 不值得，所以两边都做越界保护
+func printReasons(w io.Writer, names, reasons []string) {
+	for i, reason := range reasons {
+		if i >= 2 {
+			fmt.Fprintf(w, "     … and %d more\n", len(reasons)-2)
+			break
+		}
+		if i >= len(names) {
+			fmt.Fprintf(w, "     %s\n", reason)
+			continue
+		}
+		// 跳过的原因在引擎里已经带了「名字: 」前缀，避免重复
+		if strings.HasPrefix(reason, names[i]+":") {
+			fmt.Fprintf(w, "     %s\n", reason)
+			continue
+		}
+		fmt.Fprintf(w, "     %s: %s\n", names[i], reason)
+	}
 }
 
 func severityTag(s model.Severity) string {
@@ -644,10 +695,19 @@ func severityTag(s model.Severity) string {
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
+	// 按 rune 而不是字节切：中文报错信息在 UTF-8 字符中间断开就是乱码，
+	// 而 n<=0 时直接切片还会 panic
+	runes := []rune(s)
+	if n <= 0 {
+		return ""
+	}
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	if n == 1 {
+		return "…"
+	}
+	return string(runes[:n-1]) + "…"
 }
 
 func loadIssues(app *App, analysisID string) ([]model.Issue, error) {
@@ -664,11 +724,6 @@ func cmdCI(app *App, args []string) int {
 	ci := ciConfig{}
 	for i := range args {
 		switch args[i] {
-		case "--fail-on-critical":
-			ci.FailOnCritical = true
-		case "--allow-critical":
-			ci.FailOnCritical = false
-			ci.explicitAllowCritical = true
 		case "--no-gate":
 			ci.SkipGate = true
 		case "--allow-skipped":
@@ -691,12 +746,12 @@ func cmdCI(app *App, args []string) int {
 	}
 	// text 只有终端摘要，没有文件可写。静默忽略 --output 会让用户以为报告
 	// 生成了，所以这里直接拒绝
-	if opts.Format == "text" && opts.Output != "" {
-		fmt.Fprintf(os.Stderr, "error: --output has no effect with --format text; use json, html or sarif to write a file\n")
+	if err := validateScanFormat(opts.Format, opts.Output); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	project, analysis, runErr := runScan(ctx, app, opts)
@@ -724,6 +779,13 @@ func cmdCI(app *App, args []string) int {
 		Issues:   issues,
 		Options:  opts,
 	}
+	// 机读报告要写往 stdout 时，人类文案必须改投 stderr，否则 JSON / SARIF / HTML
+	// 文档会被摘要和 fizzra-summary 行撕开。报告写文件或格式为 text 时保持原样
+	summaryW := io.Writer(os.Stdout)
+	if opts.Output == "" && opts.Format != "" && opts.Format != "text" {
+		summaryW = os.Stderr
+	}
+
 	switch opts.Format {
 	case "json":
 		if code := target.json(); code != 0 {
@@ -739,10 +801,10 @@ func cmdCI(app *App, args []string) int {
 		}
 	}
 
-	printScanSummary(project, analysis, issues, opts.Quiet)
+	printScanSummaryTo(summaryW, project, analysis, issues, opts.Quiet)
 
 	if ci.SkipGate {
-		fmt.Println("  Gate disabled (--no-gate); exiting 0.")
+		fmt.Fprintln(summaryW, "  Gate disabled (--no-gate); exiting 0.")
 		return 0
 	}
 
@@ -772,12 +834,12 @@ func cmdCI(app *App, args []string) int {
 			gateResult.Reason = incompleteReason(analysis)
 		case ci.AllowSkipped && len(analysis.SkippedAnalyzers) > 0 && analysis.AnalyzersCompleted > 0:
 			// 用户显式放宽了「工具没装」这一种缺口。放行但必须说清楚覆盖不完整
-			fmt.Printf("  Skipped        %d analyzer(s) had no tool installed and were not run: %s\n",
+			fmt.Fprintf(summaryW, "  Skipped        %d analyzer(s) had no tool installed and were not run: %s\n",
 				len(analysis.SkippedAnalyzers), strings.Join(analysis.SkippedAnalyzers, ", "))
 			if len(analysis.SkippedTools) > 0 {
-				fmt.Printf("                 Missing tools: %s\n", strings.Join(analysis.SkippedTools, ", "))
+				fmt.Fprintf(summaryW, "                 Missing tools: %s\n", strings.Join(analysis.SkippedTools, ", "))
 			}
-			fmt.Printf("                 Allowed by --allow-skipped; the score covers only the analyzers that ran.\n")
+			fmt.Fprintf(summaryW, "                 Allowed by --allow-skipped; the score covers only the analyzers that ran.\n")
 			gateResult.Reason = fmt.Sprintf(
 				"gate passed with %d analyzer(s) skipped for missing tools", len(analysis.SkippedAnalyzers))
 		default:
@@ -792,14 +854,14 @@ func cmdCI(app *App, args []string) int {
 		}
 	}
 
-	fmt.Printf("  Result         %s\n", strings.ToUpper(gateResult.Status))
-	fmt.Printf("                 %s\n\n", gateResult.Reason)
+	fmt.Fprintf(summaryW, "  Result         %s\n", strings.ToUpper(gateResult.Status))
+	fmt.Fprintf(summaryW, "                 %s\n\n", gateResult.Reason)
 
 	// 机器可读的一行，供 CI 封装稳定地取值
 	//
 	// 上面的摘要是给人看的，排版随时可能调整，解析它等于把排版当成接口。
 	// 这一行的字段名和顺序是契约，改动等于破坏调用方
-	fmt.Printf("fizzra-summary: project=%s score=%.1f gate=%s reason=%s\n",
+	fmt.Fprintf(summaryW, "fizzra-summary: project=%s score=%.1f gate=%s reason=%s\n",
 		project.Name, analysis.Score, gateResult.Status, summaryReasonKind(analysis, gateResult))
 
 	if gateResult.Passed {
@@ -851,9 +913,7 @@ func incompleteReason(analysis *model.Analysis) string {
 }
 
 type ciConfig struct {
-	FailOnCritical        bool
-	explicitAllowCritical bool
-	SkipGate              bool
+	SkipGate bool
 	// AllowSkipped 只把「工具未安装」这一种不完整降级为通过
 	//
 	// 分析器崩溃或超时仍然失败：那是这台机器或这个项目坏了，重跑或修好后
@@ -1351,6 +1411,9 @@ func cmdRules(app *App, args []string) int {
 				Exclude:  r.Exclude,
 				Enabled:  &r.Enabled,
 				Builtin:  r.Builtin,
+
+				RequireLoop:  r.RequireLoop,
+				ForbidInLoop: r.ForbidInLoop,
 			})
 		}
 		enc := yaml.NewEncoder(os.Stdout)
@@ -1420,6 +1483,10 @@ type ruleYAML struct {
 	Exclude  []string `yaml:"exclude,omitempty"`
 	Enabled  *bool    `yaml:"enabled,omitempty"`
 	Builtin  bool     `yaml:"builtin,omitempty"`
+	// 漏导出这两个会让 export → import 的往返丢掉循环作用域限定，规则从此在
+	// 循环内外都触发
+	RequireLoop  bool `yaml:"requireLoop,omitempty"`
+	ForbidInLoop bool `yaml:"forbidInLoop,omitempty"`
 }
 
 type rulesFile struct {
