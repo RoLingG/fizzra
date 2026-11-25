@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -384,10 +386,6 @@ func applyEnv(cfg *Config) {
 }
 
 // Warning 一个被修正而非致命的问题
-//
-// 这个区分很要紧。未知键意味着你写的设置根本没被应用，静默且危险，所以那是错误。
-// 而一个我们认识的键取到了越界值是另一回事，我们清楚你想配什么，可以夹取它，
-// 拒绝启动就显得不通人情。警告会打到 stderr 上，不可能错过，但也从不阻断扫描
 type Warning struct {
 	Field   string
 	Message string
@@ -397,134 +395,122 @@ func (w Warning) String() string {
 	return fmt.Sprintf("%s: %s", w.Field, w.Message)
 }
 
-// Warnings 返回归一过程中发现的问题，如果有的话
+// Warnings 返回归一过程中发现的问题
 func (c *Config) Warnings() []Warning { return c.warnings }
+
+func (c *Config) warn(field, format string, args ...any) {
+	c.warnings = append(c.warnings, Warning{
+		Field:   field,
+		Message: fmt.Sprintf(format, args...),
+	})
+}
 
 // normalize 为未设置的值填入默认值，并修复越界的值
 //
 // 它只报告自己修不了的问题。凡是能夹取的一律记成警告而不是错误
 func (c *Config) normalize() error {
 	c.warnings = nil
-
-	if c.Server.Port == 0 {
-		c.Server.Port = 8080
-	}
-	if c.Server.Host == "" {
-		c.Server.Host = "127.0.0.1"
-	}
-	if c.Workspace.Root == "" {
-		home, _ := os.UserHomeDir()
-		c.Workspace.Root = filepath.Join(home, ".fizzra", "workspace")
-	}
-	if c.Database.DSN == "" {
-		c.Database.DSN = filepath.Join(c.Workspace.Root, "..", "fizzra.db")
-	}
-	if !filepath.IsAbs(c.Database.DSN) && c.Database.DSN != ":memory:" {
-		c.Database.DSN = filepath.Join(c.Workspace.Root, c.Database.DSN)
-	}
-	if c.Scan.Concurrency <= 0 {
-		c.Scan.Concurrency = 1
-	}
-	if c.Scan.Timeout <= 0 {
-		c.Scan.Timeout = 10 * time.Minute
-	}
-	if c.Scan.PerToolTimeout <= 0 {
-		c.Scan.PerToolTimeout = 3 * time.Minute
-	}
-	if c.Scan.MaxIssues <= 0 {
-		c.Scan.MaxIssues = 5000
-	}
-
-	// --- 能修的就修，并说明 ---------------------------------------------
-
-	if c.Server.Port < 1 || c.Server.Port > 65535 {
-		c.warnings = append(c.warnings, Warning{
-			Field:   "server.port",
-			Message: fmt.Sprintf("%d is not a valid port; using %d", c.Server.Port, 8080),
-		})
-		c.Server.Port = 8080
-	}
-
-	switch c.Server.Mode {
-	case "debug", "release", "test":
-	default:
-		c.warnings = append(c.warnings, Warning{
-			Field:   "server.mode",
-			Message: fmt.Sprintf("%q is not one of debug, release, test; using %q", c.Server.Mode, "release"),
-		})
-		c.Server.Mode = "release"
-	}
-
-	if c.Server.Mode == "" {
-		c.Server.Mode = "release"
-	}
-
-	c.Quality.MinScore = clampAndWarn(c, "quality.minScore", c.Quality.MinScore, 0, 100, 70)
-	c.Quality.MinCoverage = clampAndWarn(c, "quality.minCoverage", c.Quality.MinCoverage, 0, 100, 0)
-
-	c.Quality.MaxCritical = clampIntAndWarn(c, "quality.maxCritical", c.Quality.MaxCritical, 0, 1000)
-	c.Quality.MaxHigh = clampIntAndWarn(c, "quality.maxHigh", c.Quality.MaxHigh, 0, 1000)
-	c.Quality.MaxComplexity = clampIntAndWarn(c, "quality.maxComplexity", c.Quality.MaxComplexity, 0, 1000)
-
-	// 没有名字的规则根本无法被引用，所以丢掉而不是留一条来历不明的条目
-	// 会报告出来，但不致命
-	if len(c.Rules) > 0 {
-		kept := c.Rules[:0]
-		for i, r := range c.Rules {
-			if strings.TrimSpace(r.Name) == "" {
-				c.warnings = append(c.warnings, Warning{
-					Field:   fmt.Sprintf("rules[%d]", i),
-					Message: "rule has no name and was ignored",
-				})
-				continue
-			}
-			if len(r.Patterns) == 0 {
-				c.warnings = append(c.warnings, Warning{
-					Field:   fmt.Sprintf("rules[%d] (%s)", i, r.Name),
-					Message: "rule has no patterns and will never match; it was still loaded so you can fix it in the UI",
-				})
-			}
-			kept = append(kept, r)
-		}
-		c.Rules = kept
-	}
+	def := Default()
+	c.normalizeServer(def.Server)
+	c.normalizePaths(def.Workspace)
+	c.normalizeScan(def.Scan)
+	c.normalizeQuality(def.Quality)
+	c.normalizeRules()
 	return nil
 }
 
-// clampAndWarn 把浮点数夹到范围内，需要夹取时记一条警告
+func (c *Config) normalizeServer(def ServerConfig) {
+	if c.Server.Host == "" {
+		c.Server.Host = def.Host
+	}
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		if c.Server.Port != 0 {
+			c.warn("server.port", "%d is not a valid port; using %d", c.Server.Port, def.Port)
+		}
+		c.Server.Port = def.Port
+	}
+
+	if c.Server.Mode == "" {
+		c.Server.Mode = def.Mode
+	}
+	switch c.Server.Mode {
+	case "debug", "release", "test":
+	default:
+		c.warn("server.mode", "%q is not one of debug, release, test; using %q", c.Server.Mode, def.Mode)
+		c.Server.Mode = def.Mode
+	}
+}
+
+func (c *Config) normalizePaths(def WorkspaceConfig) {
+	if c.Workspace.Root == "" {
+		c.Workspace.Root = def.Root
+	}
+	if c.Database.DSN == "" {
+		c.Database.DSN = filepath.Join(c.Workspace.Root, "..", "fizzra.db")
+	} else if !filepath.IsAbs(c.Database.DSN) && c.Database.DSN != ":memory:" {
+		c.Database.DSN = filepath.Join(c.Workspace.Root, c.Database.DSN)
+	}
+}
+
+func (c *Config) normalizeScan(def ScanConfig) {
+	if c.Scan.Concurrency <= 0 {
+		c.Scan.Concurrency = def.Concurrency
+	}
+	if c.Scan.Timeout <= 0 {
+		c.Scan.Timeout = def.Timeout
+	}
+	if c.Scan.PerToolTimeout <= 0 {
+		c.Scan.PerToolTimeout = def.PerToolTimeout
+	}
+	if c.Scan.MaxIssues <= 0 {
+		c.Scan.MaxIssues = def.MaxIssues
+	}
+}
+
+func (c *Config) normalizeQuality(def QualityConfig) {
+	c.Quality.MinScore = clampAndWarn(c, "quality.minScore", c.Quality.MinScore, 0, 100, def.MinScore)
+	c.Quality.MinCoverage = clampAndWarn(c, "quality.minCoverage", c.Quality.MinCoverage, 0, 100, def.MinCoverage)
+	c.Quality.MaxCritical = clampIntAndWarn(c, "quality.maxCritical", c.Quality.MaxCritical, 0, 1000, def.MaxCritical)
+	c.Quality.MaxHigh = clampIntAndWarn(c, "quality.maxHigh", c.Quality.MaxHigh, 0, 1000, def.MaxHigh)
+	c.Quality.MaxComplexity = clampIntAndWarn(c, "quality.maxComplexity", c.Quality.MaxComplexity, 0, 1000, def.MaxComplexity)
+}
+
+func (c *Config) normalizeRules() {
+	if len(c.Rules) == 0 {
+		return
+	}
+	kept := c.Rules[:0]
+	for i, r := range c.Rules {
+		if strings.TrimSpace(r.Name) == "" {
+			c.warn(fmt.Sprintf("rules[%d]", i), "rule has no name and was ignored")
+			continue
+		}
+		kept = append(kept, r)
+	}
+	c.Rules = kept
+}
+
+// clampAndWarn 校验浮点数在范围内，越界时退回 fallback 并记一条警告
 func clampAndWarn(c *Config, field string, value, lo, hi, fallback float64) float64 {
 	if value >= lo && value <= hi {
 		return value
 	}
-	// 值完全落在范围之外（不只是压线）更像是笔误而不是本意，所以回退到默认值，
-	// 而不是夹到最近的边界上
-	repaired := fallback
-	if value >= 0 && value <= 100 {
-		repaired = value
-	}
-	c.warnings = append(c.warnings, Warning{
-		Field:   field,
-		Message: fmt.Sprintf("%.1f is outside %g-%g; using %.1f", value, lo, hi, repaired),
-	})
-	return repaired
+	c.warn(field, "%.1f is outside %g-%g; using %.1f", value, lo, hi, fallback)
+	return fallback
 }
 
-// clampIntAndWarn 把整数夹到范围内，需要夹取时记一条警告
-func clampIntAndWarn(c *Config, field string, value, lo, hi int) int {
+// clampIntAndWarn 校验整数在范围内，越界时退回 fallback 并记一条警告
+func clampIntAndWarn(c *Config, field string, value, lo, hi, fallback int) int {
 	if value >= lo && value <= hi {
 		return value
 	}
-	repaired := lo
-	c.warnings = append(c.warnings, Warning{
-		Field:   field,
-		Message: fmt.Sprintf("%d is outside %d-%d; using %d", value, lo, hi, repaired),
-	})
-	return repaired
+	c.warn(field, "%d is outside %d-%d; using %d", value, lo, hi, fallback)
+	return fallback
 }
 
 // Addr  HTTP 服务绑定的 host:port
 func (c *Config) Addr() string {
-	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+	return net.JoinHostPort(c.Server.Host, strconv.Itoa(c.Server.Port))
 }
 
 func parsePort(s string) (int, error) {

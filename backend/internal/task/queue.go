@@ -1,8 +1,7 @@
 // Package task 提供在后台运行分析的异步任务队列
 //
-// 目标是有 Asynq 的语义而不依赖 Redis，一个有界的 worker 池、一个够用的持久队列
-// （靠从数据库恢复孤儿记录扛过重启），以及 Enqueue / Running 这组小接口。日后换成
-// Asynq 只需改这一个文件
+// 目标是有 Asynq 的语义而不依赖 Redis：一个有界的 worker 池，加上
+// Enqueue / Running 这组小接口。日后换成 Asynq 只需改这一个文件
 package task
 
 import (
@@ -31,7 +30,7 @@ type Queue interface {
 	Running() int
 	// Start 开始处理并立即返回
 	Start(ctx context.Context)
-	// Stop 排空队列，最多等待到关闭超时
+	// Stop 中止执行中的任务，未完成的分析标成失败
 	Stop(ctx context.Context) error
 }
 
@@ -49,13 +48,13 @@ type MemoryQueue struct {
 	enqueued atomic.Int64
 	done     atomic.Int64
 	failed   atomic.Int64
-	// pending 统计关闭时交还给数据库的工作，系统接口据此能给出真实数字而不是零
-	pending atomic.Int64
 
 	startOnce sync.Once
 	stopOnce  sync.Once
 	wg        sync.WaitGroup
 	stopCh    chan struct{}
+	// stopRun 停止时取消 worker 的运行 ctx，正在跑的分析随之退出
+	stopRun context.CancelFunc
 }
 
 // Config 用于调整队列
@@ -66,20 +65,17 @@ type Config struct {
 	BufferSize int
 	// EnqueueTimeout 限制 Enqueue 等待空位的时长
 	EnqueueTimeout time.Duration
-	// ShutdownTimeout  Stop 等待进行中分析的时长
-	ShutdownTimeout time.Duration
-	// RecoverOnStart 否重新排队上一个进程遗留在 running 状态的分析
-	RecoverOnStart bool
+	// ClearOrphansOnStart 启动时把上一个进程遗留的 pending/running 标成失败
+	ClearOrphansOnStart bool
 }
 
 // DefaultConfig 返回适合单台开发机规模的配置
 func DefaultConfig() Config {
 	return Config{
-		Workers:         2,
-		BufferSize:      32,
-		EnqueueTimeout:  2 * time.Second,
-		ShutdownTimeout: 60 * time.Second,
-		RecoverOnStart:  true,
+		Workers:             2,
+		BufferSize:          32,
+		EnqueueTimeout:      2 * time.Second,
+		ClearOrphansOnStart: true,
 	}
 }
 
@@ -101,18 +97,23 @@ func NewMemoryQueue(cfg Config, runner Runner, data store.Data, log *slog.Logger
 	}
 }
 
-// Start 启动 worker 池并恢复任何孤儿分析
+// Start 启动 worker 池，并清理上一个进程遗留的未完成分析
 func (q *MemoryQueue) Start(ctx context.Context) {
 	q.startOnce.Do(func() {
-		if q.cfg.RecoverOnStart {
-			q.recoverOrphans(ctx)
+		if q.cfg.ClearOrphansOnStart {
+			q.clearOrphans()
 		}
 
 		q.log.Info("task queue started", "workers", q.cfg.Workers, "buffer", q.cfg.BufferSize)
 
+		// worker 跑在派生出来的 ctx 上，Stop 取消它就能中断正在执行的分析。
+		// 直接用调用方的 ctx 做不到这一点
+		runCtx, cancel := context.WithCancel(ctx)
+		q.stopRun = cancel
+
 		for i := 0; i < q.cfg.Workers; i++ {
 			q.wg.Add(1)
-			go q.worker(ctx, i)
+			go q.worker(runCtx, i)
 		}
 	})
 }
@@ -149,8 +150,6 @@ type Stats struct {
 	Enqueued uint64 `json:"enqueued"`
 	Done     uint64 `json:"done"`
 	Failed   uint64 `json:"failed"`
-	// Requeued 统计关闭时交还给数据库的分析
-	Requeued uint64 `json:"requeued"`
 }
 
 // Stats 返回队列计数器的一份快照
@@ -161,17 +160,21 @@ func (q *MemoryQueue) Stats() Stats {
 		Enqueued: uint64(q.enqueued.Load()),
 		Done:     uint64(q.done.Load()),
 		Failed:   uint64(q.failed.Load()),
-		Requeued: uint64(q.pending.Load()),
 	}
 }
 
-// Stop 等待进行中的分析结束，并把仍在排队的重新入队
-// 缓冲里的分析会被重置为 pending，下次启动的孤儿恢复会接上，静默丢弃会让数据行
-// 永远卡在 pending，界面显示一个永不结束的转圈
+// Stop 停止 worker 并清理未完成的分析
+//
+// ctx 决定等多久，退不出来的分析标成失败而不是留在 pending，后者在界面上
+// 等于「扫描中」，详情页会一直轮询
 func (q *MemoryQueue) Stop(ctx context.Context) error {
 	var err error
 	q.stopOnce.Do(func() {
 		close(q.stopCh)
+		// 先取消运行 ctx，正在跑的分析立刻收到 Done 并退出
+		if q.stopRun != nil {
+			q.stopRun()
+		}
 		pending := len(q.tasks)
 		q.log.Info("task queue stopping", "pending", pending)
 
@@ -185,35 +188,31 @@ func (q *MemoryQueue) Stop(ctx context.Context) error {
 		case <-finished:
 			q.log.Info("task queue stopped cleanly")
 		case <-ctx.Done():
-			err = fmt.Errorf("task queue did not drain within the shutdown timeout")
+			err = fmt.Errorf("task queue did not stop within the shutdown timeout")
 			q.log.Warn("task queue shutdown timed out; in-flight analyses are abandoned")
 		}
 
-		// 缓冲里剩余的一律回到 pending，后续启动能恢复它们而不是丢弃
-		q.requeuePending()
+		// 队列里的任务不会再跑，标成失败
+		q.abandonQueued()
 
-		// worker 停止时仍在运行的分析也会留在 pending 且没有解释，
-		// 一并标注，界面因此能显示「被关闭中断」而非未知状态
 		q.annotateInterrupted()
 	})
 	return err
 }
 
-// requeuePending 把缓冲中的分析重置回 pending
+// abandonQueued 把队列里还没开始的任务标成失败
 //
-// 先排空 channel 再写状态，这个顺序最多只会丢掉从未被确认过的工作，
-// 反过来则可能把同一条记录恢复两次
-func (q *MemoryQueue) requeuePending() {
+// 不标回 pending，那在界面上等于「扫描中」，详情页会等一个永远不会开始的扫描
+func (q *MemoryQueue) abandonQueued() {
 	var stranded []string
-	for {
+	for drained := false; !drained; {
 		select {
 		case id := <-q.tasks:
 			stranded = append(stranded, id)
 		default:
-			goto done
+			drained = true
 		}
 	}
-done:
 	if len(stranded) == 0 {
 		return
 	}
@@ -221,25 +220,22 @@ done:
 	for _, id := range stranded {
 		analysis, err := q.data.Analyses().Get(id)
 		if err != nil {
-			q.log.Warn("cannot recover queued analysis", "analysis", id, "err", err)
+			q.log.Warn("cannot mark queued analysis as abandoned", "analysis", id, "err", err)
 			continue
 		}
-		// 已经跑完的不动，只重置从未开始过的工作
-		//
-		// 排空与写入之间跑完的分析是 success，推回 pending 会让一次已完成的扫描
-		// 看起来从没跑过
+		// 排空与写入之间跑完的分析是 success，不能改回失败
 		if analysis.Status != model.StatusPending && analysis.Status != model.StatusRunning {
 			continue
 		}
-		analysis.Status = model.StatusPending
-		analysis.Error = "queued at shutdown; resumed on next start"
+		analysis.Status = model.StatusFailed
+		analysis.Error = "analysis was abandoned at shutdown; start a new scan to retry"
+		now := time.Now()
+		analysis.FinishedAt = &now
 		if err := q.data.Analyses().Update(analysis); err != nil {
-			q.log.Warn("cannot reset queued analysis", "analysis", id, "err", err)
-			continue
+			q.log.Warn("cannot mark queued analysis as abandoned", "analysis", id, "err", err)
 		}
-		q.pending.Add(1)
 	}
-	q.log.Info("requeued analyses left in the queue at shutdown", "count", len(stranded))
+	q.log.Info("abandoned queued analyses at shutdown", "count", len(stranded))
 }
 
 // worker 消费分析 ID，直到队列停止
@@ -255,7 +251,7 @@ func (q *MemoryQueue) worker(ctx context.Context, id int) {
 		case analysisID := <-q.tasks:
 			q.runOne(ctx, id, analysisID)
 
-			// 检查停止信号前先把缓冲排空，关闭应当把已接受的工作做完而不是截断
+			// 刚跑完的这一轮结束后再看一次停止信号，避免关掉之后又取下一个
 			select {
 			case <-q.stopCh:
 				return
@@ -310,10 +306,9 @@ func (q *MemoryQueue) markFailed(ctx context.Context, analysisID, reason string)
 	}
 }
 
-// annotateInterrupted 为关闭时留在 pending 的分析记下原因
+// annotateInterrupted 把关闭时还没跑完的分析标成失败
 //
-// 否则一次跑到一半被中断的运行，与一次只是排了队还没跑的运行无法区分，两者都停在
-// pending 且 Error 为空
+// 留在 pending 会显示成「扫描中」，用户分不清是真在跑还是已经停了
 func (q *MemoryQueue) annotateInterrupted() {
 	recent, err := q.data.Analyses().ListRecent(50)
 	if err != nil {
@@ -321,48 +316,44 @@ func (q *MemoryQueue) annotateInterrupted() {
 	}
 	for i := range recent {
 		a := recent[i]
-		if a.Status != model.StatusPending || a.Error != "" {
+		if a.Status != model.StatusPending && a.Status != model.StatusRunning {
 			continue
 		}
-		a.Error = "analysis was interrupted by shutdown; it will run again on the next start"
+		a.Status = model.StatusFailed
+		a.Error = "analysis was interrupted by shutdown; start a new scan to retry"
+		now := time.Now()
+		a.FinishedAt = &now
 		if err := q.data.Analyses().Update(&a); err != nil {
 			q.log.Warn("cannot annotate interrupted analysis", "analysis", a.ID, "err", err)
 		}
 	}
 }
 
-// recoverOrphans 把进程崩溃时仍在运行的分析重新排队
-//
-// 否则数据行会卡在 running，界面永远转圈。重新排队是安全的，分析是幂等的，
-// 每次运行都会重建自己的问题记录
-func (q *MemoryQueue) recoverOrphans(ctx context.Context) {
+// clearOrphans 把上一个进程遗留的未完成分析标成失败
+func (q *MemoryQueue) clearOrphans() {
 	recent, err := q.data.Analyses().ListRecent(100)
 	if err != nil {
 		q.log.Warn("cannot scan for orphaned analyses", "err", err)
 		return
 	}
 
-	var recovered int
+	var cleared int
 	for i := range recent {
 		a := recent[i]
 		if a.Status != model.StatusRunning && a.Status != model.StatusPending {
 			continue
 		}
-		// 只回收本进程启动之前遗留、且尚未排队的工作
-		a.Status = model.StatusPending
-		a.Error = "requeued after an unclean shutdown"
+		a.Status = model.StatusFailed
+		a.Error = "analysis was interrupted by an unclean shutdown; start a new scan to retry"
+		now := time.Now()
+		a.FinishedAt = &now
 		if err := q.data.Analyses().Update(&a); err != nil {
-			q.log.Warn("cannot reset orphaned analysis", "analysis", a.ID, "err", err)
+			q.log.Warn("cannot clear orphaned analysis", "analysis", a.ID, "err", err)
 			continue
 		}
-		select {
-		case q.tasks <- a.ID:
-			recovered++
-		default:
-			q.log.Warn("queue full while recovering orphans, remaining analyses stay pending", "analysis", a.ID)
-		}
+		cleared++
 	}
-	if recovered > 0 {
-		q.log.Info("recovered orphaned analyses", "count", recovered)
+	if cleared > 0 {
+		q.log.Info("cleared analyses left over from an unclean shutdown", "count", cleared)
 	}
 }

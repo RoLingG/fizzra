@@ -15,10 +15,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -46,7 +48,12 @@ func run() int {
 	}
 
 	// 全局标志只认命令之前的位置
-	flags, command, commandArgs := parseGlobalFlags(os.Args[1:])
+	flags, command, commandArgs, err := parseGlobalFlags(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n\n", err)
+		printUsage()
+		return 2
+	}
 
 	if flags.help || command == "help" {
 		printUsage()
@@ -86,7 +93,6 @@ func run() int {
 	app, err := bootstrap(cfg, log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
-		fmt.Fprintf(os.Stderr, "startup failed: %v\n", err)
 		return 1
 	}
 	defer app.Close()
@@ -185,7 +191,7 @@ func lookupFlagSpec(name string) (flagSpec, bool) {
 // parseGlobalFlags 取开头的全局标志，返回它们、命令名和命令自己的参数
 //
 // 遇到第一个不以 - 开头、或不认识的参数就停，那之后的都归子命令处理
-func parseGlobalFlags(args []string) (globalFlags, string, []string) {
+func parseGlobalFlags(args []string) (globalFlags, string, []string, error) {
 	var flags globalFlags
 	i := 0
 	for i < len(args) {
@@ -202,8 +208,7 @@ func parseGlobalFlags(args []string) (globalFlags, string, []string) {
 		value := ""
 		if spec.takesValue {
 			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "flag %s requires a value\n", arg)
-				os.Exit(2)
+				return flags, "", nil, fmt.Errorf("flag %s requires a value", arg)
 			}
 			value = args[i+1]
 			i++
@@ -218,7 +223,7 @@ func parseGlobalFlags(args []string) (globalFlags, string, []string) {
 		command = args[i]
 		rest = args[i+1:]
 	}
-	return flags, command, rest
+	return flags, command, rest, nil
 }
 
 // App 打包每条命令共用的、已接好线的依赖
@@ -244,13 +249,21 @@ func (a *App) Close() {
 }
 
 // bootstrap 接好依赖图
-// 所有依赖都显式构造在这里，不依赖 DI 容器或 init() 的副作用，
-// 追溯依赖关系只需看这一处
+// 所有依赖都显式构造在这里，不依赖 DI 容器或 init() 的副作用，追溯依赖关系只需看这一处
 func bootstrap(cfg *config.Config, log *slog.Logger) (*App, error) {
 	db, err := store.Open(cfg, log)
 	if err != nil {
 		return nil, err
 	}
+	// 中途任一步失败就关掉连接，成功时由 App.Close 负责
+	ok := false
+	defer func() {
+		if !ok {
+			if cerr := db.Close(); cerr != nil {
+				log.Warn("database close failed", "err", cerr)
+			}
+		}
+	}()
 
 	data := store.NewData(db)
 	if cfg.Database.AutoMigrate {
@@ -300,7 +313,6 @@ func bootstrap(cfg *config.Config, log *slog.Logger) (*App, error) {
 
 	queueCfg := task.DefaultConfig()
 	queueCfg.Workers = cfg.Scan.Concurrency
-	queueCfg.ShutdownTimeout = cfg.Scan.Timeout + 15*time.Second
 	queue := task.NewMemoryQueue(queueCfg, engine, data, log)
 	app.Queue = queue
 
@@ -315,6 +327,7 @@ func bootstrap(cfg *config.Config, log *slog.Logger) (*App, error) {
 	}
 	app.Svc = svc
 
+	ok = true
 	return app, nil
 }
 
@@ -339,10 +352,8 @@ func seedRules(data store.Data, cfg *config.Config, log *slog.Logger) error {
 	for i := range builtins {
 		b := builtins[i]
 
-		// 被配置定制的内置规则按配置值创建，不走内置默认值的 upsert，
-		// 下面的 upsert 有意不碰排除列表
 		if rc, ok := overrides[b.Name]; ok {
-			if err := applyConfigRule(data, rc, log); err != nil {
+			if err := applyConfigRule(data, rc, &b, log); err != nil {
 				return err
 			}
 			continue
@@ -361,7 +372,12 @@ func seedRules(data store.Data, cfg *config.Config, log *slog.Logger) error {
 		if _, isBuiltin := builtinNames[rc.Name]; isBuiltin {
 			continue // already handled above
 		}
-		if err := applyConfigRule(data, rc, log); err != nil {
+		// 内置规则的覆盖会从内置定义继承 patterns，只有全新规则才可能真的没有
+		if len(rc.Patterns) == 0 {
+			log.Warn("configured rule has no patterns and will never match; it was still loaded so you can fix it in the UI",
+				"rule", rc.Name)
+		}
+		if err := applyConfigRule(data, rc, nil, log); err != nil {
 			return err
 		}
 	}
@@ -378,31 +394,14 @@ var builtinNames = func() map[string]bool {
 }()
 
 // applyConfigRule 根据配置条目创建或更新一条规则
-func applyConfigRule(data store.Data, rc config.RuleConfig, log *slog.Logger) error {
-	enabled := true
-	if rc.Enabled != nil {
-		enabled = *rc.Enabled
-	}
-
+//
+// base 是内置定义，创建新规则时以它为基底，配置里没写的字段沿用内置值
+func applyConfigRule(data store.Data, rc config.RuleConfig, base *model.Rule, log *slog.Logger) error {
 	existing, err := data.Rules().GetByName(rc.Name)
 	if err == nil {
-		// 这些字段归配置所有，显式的值会替换已存内容，包括空列表，空列表表示不设限制
-		existing.Severity = model.ParseSeverity(stringOr(rc.Severity, string(existing.Severity)))
-		existing.Enabled = enabled
-		if rc.Message != "" {
-			existing.Message = rc.Message
-		}
-		if rc.Advice != "" {
-			existing.Advice = rc.Advice
-		}
-		if len(rc.Patterns) > 0 {
-			existing.Patterns = rc.Patterns
-		}
-		if len(rc.Paths) > 0 {
-			existing.Paths = rc.Paths
-		}
-		if len(rc.Exclude) > 0 {
-			existing.Exclude = rc.Exclude
+		mergeConfigRule(existing, rc)
+		if err := validateConfigRule(existing); err != nil {
+			return err
 		}
 		if err := data.Rules().Update(existing); err != nil {
 			return fmt.Errorf("apply config for rule %s: %w", rc.Name, err)
@@ -417,17 +416,18 @@ func applyConfigRule(data store.Data, rc config.RuleConfig, log *slog.Logger) er
 		ID:        model.NewID("rul"),
 		Name:      rc.Name,
 		Analyzer:  stringOr(rc.Analyzer, "custom"),
-		Severity:  model.ParseSeverity(stringOr(rc.Severity, string(model.SeverityWarning))),
-		Message:   rc.Message,
-		Advice:    rc.Advice,
-		Patterns:  rc.Patterns,
-		Paths:     rc.Paths,
-		Exclude:   rc.Exclude,
-		Enabled:   enabled,
-		Builtin:   rc.Builtin,
+		Severity:  model.SeverityWarning,
+		Enabled:   true,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+	if base != nil {
+		*newRule = *base
+		newRule.ID = model.NewID("rul")
+		newRule.CreatedAt = time.Now()
+	}
+	mergeConfigRule(newRule, rc)
+
 	if err := validateConfigRule(newRule); err != nil {
 		// 配置里的坏模式是硬错误，静默丢弃意味着你配的规则没在跑且毫无提示
 		return err
@@ -437,6 +437,41 @@ func applyConfigRule(data store.Data, rc config.RuleConfig, log *slog.Logger) er
 	}
 	log.Debug("created rule from config", "rule", rc.Name)
 	return nil
+}
+
+// mergeConfigRule 把配置里显式写了的字段覆盖到规则上
+//
+// 字符串按非空判断，切片按非 nil 判断：配置里写 `exclude: []` 是「清空」，
+// 用长度判断会让它什么都不做
+func mergeConfigRule(r *model.Rule, rc config.RuleConfig) {
+	if rc.Analyzer != "" {
+		r.Analyzer = rc.Analyzer
+	}
+	if rc.Severity != "" {
+		r.Severity = model.ParseSeverity(rc.Severity)
+	}
+	if rc.Message != "" {
+		r.Message = rc.Message
+	}
+	if rc.Advice != "" {
+		r.Advice = rc.Advice
+	}
+	if rc.Patterns != nil {
+		r.Patterns = rc.Patterns
+	}
+	if rc.Paths != nil {
+		r.Paths = rc.Paths
+	}
+	if rc.Exclude != nil {
+		r.Exclude = rc.Exclude
+	}
+	if rc.Enabled != nil {
+		// 没写 enabled 时保留原状态，否则每次重启都会把界面上禁用的规则重新启用
+		r.Enabled = *rc.Enabled
+	}
+	r.Builtin = r.Builtin || rc.Builtin
+	r.RequireLoop = rc.RequireLoop
+	r.ForbidInLoop = rc.ForbidInLoop
 }
 
 // ---------------------------------------------------------------------------
@@ -456,20 +491,35 @@ func cmdServe(app *App, args []string) int {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--addr", "--host":
-			if i+1 < len(args) {
-				i++
-				// 同时接受 "host:port" 和裸端口
-				if isPort(args[i]) {
-					addr = fmt.Sprintf("%s:%s", cfg.Server.Host, args[i])
-				} else {
-					addr = args[i]
-				}
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "flag %s requires a value\n", args[i])
+				return 2
+			}
+			i++
+			if isPort(args[i]) {
+				addr = net.JoinHostPort(cfg.Server.Host, args[i])
+			} else if host, port, err := net.SplitHostPort(args[i]); err == nil {
+				addr = net.JoinHostPort(host, port)
+			} else {
+				fmt.Fprintf(os.Stderr, "invalid address %q\n", args[i])
+				return 2
 			}
 		case "--port", "-p":
-			if i+1 < len(args) {
-				i++
-				addr = fmt.Sprintf("%s:%s", cfg.Server.Host, args[i])
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "flag %s requires a value\n", args[i])
+				return 2
 			}
+			i++
+			if !isPort(args[i]) {
+				fmt.Fprintf(os.Stderr, "invalid port %q; must be 1-65535\n", args[i])
+				return 2
+			}
+			addr = net.JoinHostPort(cfg.Server.Host, args[i])
+		default:
+			// 以前这里静默忽略拼错的参数，服务照常在默认端口起来，
+			// 用户以为自己的 --port 生效了
+			fmt.Fprintf(os.Stderr, "unknown argument %q\n\n%s\n", args[i], serveUsage)
+			return 2
 		}
 	}
 
@@ -477,6 +527,8 @@ func cmdServe(app *App, args []string) int {
 	defer stop()
 
 	// worker 池先于 HTTP 监听启动，服务起来后立刻到来的请求即可入队
+	//
+	// ctx 取消时 worker 里正在跑的分析也随之取消，与下面 Stop 取消的是同一条链
 	app.Queue.Start(ctx)
 
 	handler := api.NewHandler(app.Svc, app.Log)
@@ -507,13 +559,19 @@ func cmdServe(app *App, args []string) int {
 
 	select {
 	case err := <-errCh:
+		// 端口被占用之类的启动失败：队列已经在跑了，先停掉再返回，
+		// 否则外层关闭数据库时会和 worker 的写库撞上
 		app.Log.Error("http server failed", "err", err)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		_ = app.Queue.Stop(stopCtx)
 		return 1
 	case <-ctx.Done():
 		app.Log.Info("shutdown signal received")
 	}
 
-	// 优雅关闭，先停止接受请求，再排空队列
+	// 先让 HTTP 停止接受请求，再停 worker。两者共用一个 30 秒的期限：
+	// 用户按了 Ctrl-C 就是要它停，运行中的分析随之取消并标成中断
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -534,9 +592,9 @@ func cmdServe(app *App, args []string) int {
 const serveUsage = `Usage: fizzra serve [flags]
 
 Starts the web dashboard and the JSON API, plus the background worker pool that
-runs queued analyses. Runs until interrupted (Ctrl-C), then shuts down
-gracefully: in-flight analyses finish, and anything still queued is returned to
-the database so the next start resumes it.
+runs queued analyses. Runs until interrupted (Ctrl-C), then stops immediately:
+analyses that were running or still queued are marked failed, never resumed on
+the next start. Start a new scan to retry.
 
 Flags:
   --addr, --host <h:p>  Bind address (default 127.0.0.1:8080)
@@ -550,16 +608,13 @@ Examples:
   fizzra serve --port 9090
   fizzra --config ./fizzra.yaml serve`
 
+// isPort 报告 s 是否是 1 到 65535 之间的十进制端口号
 func isPort(s string) bool {
-	if s == "" {
+	n, err := strconv.Atoi(s)
+	if err != nil {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
+	return n >= 1 && n <= 65535
 }
 
 func stringOr(v, fallback string) string {
@@ -626,7 +681,9 @@ func formatFlagSpecs(specs []flagSpec) string {
 
 // validateConfigRule 检查来自配置的规则是否真能跑起来
 func validateConfigRule(r *model.Rule) error {
-	engine := rule.New([]model.Rule{*r})
+	probe := *r
+	probe.Enabled = true
+	engine := rule.New([]model.Rule{probe})
 	if skipped := engine.Skipped(); len(skipped) > 0 {
 		return fmt.Errorf("invalid rule %q in configuration: %w", r.Name, skipped[0])
 	}

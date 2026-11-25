@@ -31,6 +31,16 @@ func (h *Handler) streamEvents(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	// 关闭代理缓冲，否则事件会攒到连接结束才一起送出
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
+
+	// 清掉本次请求的写超时。http.Server.WriteTimeout 是从请求开始算的绝对
+	// 截止时间，不清的话这条流会在建立 5 分钟后被掐断，而扫描往往比这更久
+	rc := http.NewResponseController(c.Writer)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		// 底层不支持时这条流会在 WriteTimeout 到点后断开，用户那边表现为
+		// 进度突然不动了，值得在日志里留一笔
+		h.Log.Warn("could not clear the write deadline; this SSE stream will end at WriteTimeout", "err", err)
+	}
+
 	c.Writer.WriteHeader(http.StatusOK)
 
 	events, cancel := engine.Events.Subscribe()
@@ -52,8 +62,8 @@ func (h *Handler) streamEvents(c *gin.Context) {
 			// h.Shutdown 为 nil 时这个分支永远不会就绪
 			return
 		case <-ticker.C:
-			// 这行注释既是保活，也让 goroutine 每 15s 醒一次。连接已关闭时写入
-			// 会失败，下一轮 select 就能从 Done 退出
+			// 这行注释既是保活，也让 goroutine 每 15s 醒一次。
+			// 连接已关闭时写入会失败，下一轮 select 就能从 Done 退出
 			if _, err := c.Writer.WriteString(": ping\n\n"); err != nil {
 				return
 			}

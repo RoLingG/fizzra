@@ -313,24 +313,10 @@ func (r Rule) accepts(ctx matchContext, line string, loc []int, syntax Syntax) b
 	// 会吃掉关键字左边的一个字符，对 `Message: "panic() called ..."` 来说吃掉的正是
 	// 开引号。以匹配起点检查会得出「不在字符串里」，而关键字从后一位开始，那个位置
 	// 才在字面量内部。因此两个偏移都测，任一在字面量内即视为文本
-	keywordStart := loc[0]
-	if loc[1] > loc[0] {
-		matched := line[loc[0]:loc[1]]
-		// 跳过一个前导的边界字符（引号、空格、括号等）
-		if len(matched) > 0 && !isWordByte(matched[0]) && matched[0] != '.' {
-			if trimmed := strings.TrimLeft(matched, "^ \t"); trimmed != matched {
-				keywordStart = loc[0] + (len(matched) - len(trimmed))
-			} else {
-				keywordStart = loc[0] + 1
-			}
-		}
-	}
-	if keywordStart > loc[0] && keywordStart < len(line) {
-		if inStringLiteral(line, keywordStart, syntax) {
-			return false
-		}
-	}
 	if inStringLiteral(line, loc[0], syntax) {
+		return false
+	}
+	if kw := keywordOffset(line, loc); kw > loc[0] && kw < len(line) && inStringLiteral(line, kw, syntax) {
 		return false
 	}
 
@@ -341,6 +327,21 @@ func (r Rule) accepts(ctx matchContext, line string, loc []int, syntax Syntax) b
 		return false
 	}
 	return true
+}
+
+// keywordOffset 跳过匹配开头的前导边界字符，返回关键字本身的位置
+func keywordOffset(line string, loc []int) int {
+	if loc[1] <= loc[0] {
+		return loc[0]
+	}
+	matched := line[loc[0]:loc[1]]
+	if len(matched) == 0 || isWordByte(matched[0]) || matched[0] == '.' {
+		return loc[0]
+	}
+	if trimmed := strings.TrimLeft(matched, "^ \t"); trimmed != matched {
+		return loc[0] + (len(matched) - len(trimmed))
+	}
+	return loc[0] + 1
 }
 
 // isWordByte 报告 b 能否出现在 Go 标识符中
