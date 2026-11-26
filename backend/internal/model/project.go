@@ -50,20 +50,9 @@ const (
 // AllLanguages 列出支持的语言，最成熟的在前
 var AllLanguages = []string{LanguageGo, LanguageRust, LanguagePython, LanguageJavaScript, LanguageJava, LanguageCSharp, LanguageCpp, LanguagePHP}
 
-// ValidLanguage 报告 lang 是否为 Fizzra 能分析的语言
-func ValidLanguage(lang string) bool {
-	for _, l := range AllLanguages {
-		if l == lang {
-			return true
-		}
-	}
-	return false
-}
-
 // KindIsValidFor 报告 kind 是否为 lang 下可识别的框架
-// 空 kind 始终合法，大多数项目不使用任何框架专项检查
-// go 对 Go 项目也当成「没有框架」接受，已有数据行和命令行调用都带着这个值
-// wails 仅限 Go，因为 Wails 是 Go 的框架
+// 空 kind 始终合法，大多数项目不使用任何框架专项检查 go 对 Go 项目也当成「没有框架」接受，
+// 已有数据行和命令行调用都带着这个值 wails 仅限 Go，因为 Wails 是 Go 的框架
 func KindIsValidFor(lang, kind string) bool {
 	if kind == "" || kind == lang {
 		return true

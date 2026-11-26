@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -35,13 +36,26 @@ func (s *SQLData) Migrate() error {
 // backfillSeverityRank 按 severity 重算已有行的 severity_rank
 //
 // 新加的列默认 0，等于把历史问题全标成 critical。只更新确实需要修正的行，
-// 重复执行不会覆盖正常数据，这里的序号必须与 model.Severity.Rank 一致
+// 重复执行不会覆盖正常数据
+//
+// CASE 分支从 model.AllSeverities 生成而不是写死，等级表加一项时这里自动跟上，
+// 不会出现「Go 侧认 4 是 info、SQL 侧认 3」这种漂移
 func (s *SQLData) backfillSeverityRank() error {
-	return s.db.Exec(`UPDATE issues SET severity_rank = CASE severity
-			WHEN 'critical' THEN 0 WHEN 'error' THEN 1 WHEN 'warning' THEN 2 WHEN 'info' THEN 3
-			ELSE 4 END
-		WHERE severity != 'critical'
-			AND (severity_rank = 0 OR severity_rank IS NULL)`).Error
+	var b strings.Builder
+	b.WriteString("UPDATE issues SET severity_rank = CASE severity ")
+	for i := range model.AllSeverities {
+		fmt.Fprintf(&b, "WHEN ? THEN %d ", i)
+	}
+	fmt.Fprintf(&b, "ELSE %d END ", len(model.AllSeverities))
+	b.WriteString("WHERE severity != ? AND (severity_rank = 0 OR severity_rank IS NULL)")
+
+	args := make([]any, 0, len(model.AllSeverities)+1)
+	for _, sev := range model.AllSeverities {
+		args = append(args, string(sev))
+	}
+	args = append(args, string(model.SeverityCritical))
+
+	return s.db.Exec(b.String(), args...).Error
 }
 
 func (s *SQLData) Projects() ProjectRepo         { return &projectRepo{db: s.db} }
@@ -49,6 +63,15 @@ func (s *SQLData) Analyses() AnalysisRepo        { return &analysisRepo{db: s.db
 func (s *SQLData) Issues() IssueRepo             { return &issueRepo{db: s.db} }
 func (s *SQLData) Rules() RuleRepo               { return &ruleRepo{db: s.db} }
 func (s *SQLData) QualityGates() QualityGateRepo { return &qualityGateRepo{db: s.db} }
+
+// WithTx 在一个事务里执行 fn，fn 收到的 Data 绑定同一个事务
+//
+// 事务提交后返回 nil，fn 返回错误或提交失败都会回滚。嵌套调用会复用外层事务，不会另开一个
+func (s *SQLData) WithTx(fn func(Data) error) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		return fn(&SQLData{db: &DB{DB: tx, log: s.db.log}})
+	})
+}
 
 // translateError 把 GORM 的哨兵错误转成 store 的哨兵错误，代码库其余部分因此
 func translateError(err error) error {

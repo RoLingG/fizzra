@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -32,6 +33,11 @@ func (s StringSlice) Value() (driver.Value, error) {
 	return string(b), nil
 }
 
+// Scan 把列值还原成字符串切片
+//
+// JSON 解析失败时只回退到逗号分隔，且仅在值看起来确实不是 JSON 时才回退。
+// 以前对任何解析失败都按逗号切，于是截断的 `["a","b` 被切成 `["a"` 与 `"b]`、
+// 对象被原样塞进切片、二进制垃圾也照样“成功”，坏数据一路流到界面
 func (s *StringSlice) Scan(src any) error {
 	raw, err := bytesFrom(src)
 	if err != nil {
@@ -44,16 +50,43 @@ func (s *StringSlice) Scan(src any) error {
 
 	var out []string
 	if err := json.Unmarshal(raw, &out); err != nil {
-		// 兼容旧的逗号分隔取值，避免查询直接失败
+		if !looksLikeLegacyList(raw) {
+			return fmt.Errorf("column holds malformed JSON: %w", err)
+		}
 		out = nil
-		for _, p := range strings.Split(string(raw), ",") {
+		for p := range strings.SplitSeq(string(raw), ",") {
 			if p = strings.TrimSpace(p); p != "" {
 				out = append(out, p)
 			}
 		}
+		*s = out
+		return nil
 	}
 	*s = out
 	return nil
+}
+
+// looksLikeLegacyList 报告值是否可能是旧的逗号分隔格式
+//
+// 两种值不能猜：以 `[` 或 `{` 开头的说明本该是 JSON，解析失败即损坏；
+// 含控制字符的说明不是人写出来的配置，是二进制垃圾
+func looksLikeLegacyList(raw []byte) bool {
+	for _, b := range raw {
+		if b < 0x20 && b != '\t' && b != '\r' && b != '\n' {
+			return false
+		}
+	}
+	for _, b := range raw {
+		switch b {
+		case ' ', '\t', '\r', '\n':
+			continue
+		case '[', '{':
+			return false
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (*StringSlice) GormDataType() string { return "text" }
@@ -67,6 +100,9 @@ func (*StringSlice) GormDBDataType(*gorm.DB, *schema.Field) string { return "tex
 // MultiString 的行为与 StringSlice 相同，但还能接受 YAML 里的单个标量，手写配置因此更宽容
 type MultiString []string
 
+// Value 用值接收器、Scan 用指针接收器是 driver.Valuer 与 sql.Scanner 的要求，
+// 与 Go 标准库的 sql.NullString 一致。字段声明为值类型时，指针接收器的 Value
+// 不在其方法集里，GORM 认不出 driver.Valuer，同样会掉进上面的行元组错误
 func (m MultiString) Value() (driver.Value, error) { return StringSlice(m).Value() }
 
 func (m *MultiString) Scan(src any) error { return (*StringSlice)(m).Scan(src) }

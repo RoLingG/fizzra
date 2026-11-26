@@ -105,11 +105,11 @@ func Grade(score float64) string {
 // Score 计算加权质量评分
 func Score(in Input, w Weights, t Thresholds) Result {
 	dims := []Dimension{
-		securityDimension(in, t),
-		bugDimension(in, t),
-		maintainabilityDimension(in, t),
-		complexityDimension(in, t),
-		coverageDimension(in, t),
+		securityDimension(in, w, t),
+		bugDimension(in, w, t),
+		maintainabilityDimension(in, w, t),
+		complexityDimension(in, w, t),
+		coverageDimension(in, w, t),
 	}
 
 	// 未测出的维度不占权重，其余维度按剩余权重重新归一
@@ -146,7 +146,7 @@ func Score(in Input, w Weights, t Thresholds) Result {
 //   - 对数项随数量继续增长但不超出预算，5 个 critical 与 500 个因此可以区分
 //
 // 纯饱和曲线会让两者同分，对排优先级没有用处，所以没有采用
-func securityDimension(in Input, t Thresholds) Dimension {
+func securityDimension(in Input, w Weights, t Thresholds) Dimension {
 	critical, high := 0, 0
 	for _, i := range in.Issues {
 		switch i.Severity {
@@ -171,7 +171,7 @@ func securityDimension(in Input, t Thresholds) Dimension {
 	return Dimension{
 		Name:   "Security",
 		Score:  math.Round(score*10) / 10,
-		Weight: DefaultWeights().Security,
+		Weight: w.Security,
 		Detail: fmt.Sprintf("%d critical, %d high-severity findings", critical, high),
 	}
 }
@@ -180,7 +180,7 @@ func securityDimension(in Input, t Thresholds) Dimension {
 //
 // 只数 warning 会让有五十个 critical 的项目拿到满分的 bug 子分。critical 已在安全
 // 维度重罚过，这里只让它贡献较小的权重，两个维度因此给出连贯的结论
-func bugDimension(in Input, t Thresholds) Dimension {
+func bugDimension(in Input, w Weights, t Thresholds) Dimension {
 	warnings, errors, critical := 0, 0, 0
 	for _, i := range in.Issues {
 		switch i.Severity {
@@ -210,13 +210,13 @@ func bugDimension(in Input, t Thresholds) Dimension {
 	return Dimension{
 		Name:   "Bug risk",
 		Score:  math.Round(score*10) / 10,
-		Weight: DefaultWeights().Bugs,
+		Weight: w.Bugs,
 		Detail: fmt.Sprintf("%d warnings (%.1f per 1000 LOC), %d error, %d critical", warnings, density, errors, critical),
 	}
 }
 
 // maintainabilityDimension 对重复率、注释比例和问题分布评分
-func maintainabilityDimension(in Input, t Thresholds) Dimension {
+func maintainabilityDimension(in Input, w Weights, t Thresholds) Dimension {
 	dup := in.Metrics.Duplication
 
 	// 一点重复是正常的，得分在配置的天花板处线性降到零
@@ -248,7 +248,7 @@ func maintainabilityDimension(in Input, t Thresholds) Dimension {
 	return Dimension{
 		Name:   "Maintainability",
 		Score:  math.Round(score*10) / 10,
-		Weight: DefaultWeights().Maintainability,
+		Weight: w.Maintainability,
 		Detail: detail,
 	}
 }
@@ -260,7 +260,7 @@ func maintainabilityDimension(in Input, t Thresholds) Dimension {
 //
 // 是否测过从指标判断而不是从语言判断，所以确实没有函数的 Go 项目走同一条规则，
 // 没数到函数就说明什么都没测，该维度如实说明而不是宣称完美
-func complexityDimension(in Input, t Thresholds) Dimension {
+func complexityDimension(in Input, w Weights, t Thresholds) Dimension {
 	measured := in.Metrics.Functions > 0
 	avg := in.Metrics.AvgComplexity
 	worst := in.Metrics.MaxComplexity
@@ -289,13 +289,13 @@ func complexityDimension(in Input, t Thresholds) Dimension {
 	return Dimension{
 		Name:   "Complexity",
 		Score:  math.Round(score*10) / 10,
-		Weight: DefaultWeights().Complexity,
+		Weight: w.Complexity,
 		Detail: fmt.Sprintf("avg %.1f, worst %d", avg, worst),
 	}
 }
 
 // coverageDimension 对测试覆盖率评分，没有覆盖率报告时回退到以有无测试来代理
-func coverageDimension(in Input, t Thresholds) Dimension {
+func coverageDimension(in Input, w Weights, t Thresholds) Dimension {
 	cov := in.Metrics.Coverage
 	if cov <= 0 {
 		// 没有可用报告时以有无测试作代理，否则没有覆盖率工具的项目会和零测试的
@@ -304,14 +304,14 @@ func coverageDimension(in Input, t Thresholds) Dimension {
 			return Dimension{
 				Name:   "Coverage",
 				Score:  30,
-				Weight: DefaultWeights().Coverage,
+				Weight: w.Coverage,
 				Detail: "no test files found",
 			}
 		}
 		return Dimension{
 			Name:   "Coverage",
 			Score:  65,
-			Weight: DefaultWeights().Coverage,
+			Weight: w.Coverage,
 			Detail: fmt.Sprintf("%d test files (no coverage profile; run `go test -coverprofile=coverage.out ./...`)", in.Metrics.TestFiles),
 		}
 	}
@@ -323,7 +323,7 @@ func coverageDimension(in Input, t Thresholds) Dimension {
 	return Dimension{
 		Name:   "Coverage",
 		Score:  math.Round(score*10) / 10,
-		Weight: DefaultWeights().Coverage,
+		Weight: w.Coverage,
 		Detail: fmt.Sprintf("%.1f%% statements", cov),
 	}
 }

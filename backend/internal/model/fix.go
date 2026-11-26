@@ -27,8 +27,10 @@ type FixExample struct {
 	Language string `json:"language,omitempty"`
 }
 
-// Value 实现 driver.Valuer，示例以 JSON 存进 TEXT 列，与本表结构中其他
-// 结构化列一致
+// Value 实现 driver.Valuer，示例以 JSON 存进 TEXT 列，与本表结构中其他结构化列一致
+//
+// 必须是值接收器：Issue.Fix 是非指针字段，取值时是值类型，
+// 指针接收器的方法不在值类型的方法集里，database/sql 会认不出 driver.Valuer
 func (f FixExample) Value() (driver.Value, error) {
 	if f.Before == "" && f.After == "" {
 		return "{}", nil

@@ -149,14 +149,27 @@ type RuleConfig struct {
 	Builtin  bool     `yaml:"builtin"`
 	// 作用域修饰符，与 model.Rule 一致
 	// 没有它们，写在配置里的规则就无法表达内置规则赖以规避误报的循环作用域限定
-	RequireLoop  bool `yaml:"requireLoop"`
-	ForbidInLoop bool `yaml:"forbidInLoop"`
+	//
+	// 用 *bool 是为了区分「没写」和「显式写 false」，普通 bool 的零值把两者
+	// 混为一谈，用户便无法用 requireLoop: false 关掉内置规则的循环限定
+	RequireLoop  *bool `yaml:"requireLoop"`
+	ForbidInLoop *bool `yaml:"forbidInLoop"`
 }
 
 // Default 返回没有任何其他配置时使用的出厂配置
 func Default() *Config {
 	home, _ := os.UserHomeDir()
 	root := filepath.Join(home, ".fizzra")
+	if home == "" {
+		// 没有 HOME（容器、精简 CI 镜像）时 UserHomeDir 返回空串，起点会变成
+		// 相对路径 ".fizzra"，再经 normalizePaths 拼接就叠成
+		// ".fizzra/workspace/.fizzra/fizzra.db"。落到绝对路径避免二次拼接
+		if abs, err := filepath.Abs(".fizzra"); err == nil {
+			root = abs
+		} else {
+			root = ".fizzra"
+		}
+	}
 
 	return &Config{
 		Server: ServerConfig{
@@ -208,14 +221,17 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("read config %s: %w", resolved, err)
 		}
 
-		// 校验之前先把本文件允许使用的别名归一，这样一个较旧的或按规范形状写的
-		// 拼法会被接受而不是拒绝
-		normalised, err := normaliseAliases(raw)
+		// 一次解析，之后在节点树上原地归一与校验，行号因此始终指向原文件
+		doc, err := parseYAMLNode(raw)
 		if err != nil {
 			return nil, fmt.Errorf("config %s: %w", resolved, err)
 		}
 
-		if problems := Validate(normalised); len(problems) > 0 {
+		var problems []error
+		if doc != nil {
+			problems = append(normaliseAliasesNode(doc), validateNode(doc)...)
+		}
+		if len(problems) > 0 {
 			msgs := make([]string, 0, len(problems))
 			for _, p := range problems {
 				msgs = append(msgs, p.Error())
@@ -224,18 +240,23 @@ func Load(path string) (*Config, error) {
 				resolved, len(problems), strings.Join(msgs, "\n  - "))
 		}
 
-		if err := yaml.Unmarshal(normalised, cfg); err != nil {
-			return nil, fmt.Errorf("parse config %s: %w", resolved, err)
+		if doc != nil {
+			if err := doc.Decode(cfg); err != nil {
+				return nil, fmt.Errorf("parse config %s: %w", resolved, err)
+			}
 		}
 		cfg.Source = resolved
 	} else if explicit {
 		return nil, fmt.Errorf("config file %s not found", path)
 	}
 
-	applyEnv(cfg)
+	// applyEnv 先于 normalize，因为 normalize 要修正 env 给出的值。normalize
+	// 首行会清空 warnings 以保证自身幂等，因此 env 阶段的告警要在它之后再并回去
+	envWarnings := applyEnv(cfg)
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}
+	cfg.warnings = append(cfg.warnings, envWarnings...)
 	return cfg, nil
 }
 
@@ -248,25 +269,31 @@ var aliases = map[string]string{
 	"quality.coverage":      "quality.minCoverage",
 	"quality.criticalIssue": "quality.maxCritical",
 	"quality.highSecurity":  "quality.maxHigh",
-	// `level` 是规范里给规则 severity 用的名字
-	"severity": "severity",
 }
 
-// normaliseAliases 把别名键改写成规范拼写
+// 规则条目内部接受的规范拼法
+var ruleAliases = map[string]string{
+	"level":   "severity",
+	"pattern": "patterns",
+}
+
+// normaliseAliasesNode 把别名键改写成规范拼写，返回冲突错误
 //
-// 改的是 YAML 节点树而不是原始文本，这样注释和行号得以保留。这很要紧，因为接下来
-// 的校验错误会引用那些行号
-func normaliseAliases(raw []byte) ([]byte, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
+// 直接在 YAML 节点树上原地改写，不重编码成字节流，这样注释与行号保持指向原文，
+// 后续校验错误引用的行号才是用户能照着找到的那一行
+//
+// 同一映射里别名与规范键并存是冲突而不是覆盖，两个键指向同一项设置，用户无从
+// 判断哪一行生效，因此报错要求只保留一个
+func normaliseAliasesNode(doc *yaml.Node) []error {
+	if doc == nil || len(doc.Content) == 0 {
+		return nil
 	}
-	if len(doc.Content) == 0 {
-		return raw, nil
-	}
+
+	var problems []error
 
 	// ruleSection 标记「我们正处在 rules 列表的某一项里」
 	const ruleSection = "rules[]"
+	visited := map[*yaml.Node]bool{}
 
 	var walk func(node *yaml.Node, prefix string)
 	walk = func(node *yaml.Node, prefix string) {
@@ -287,46 +314,81 @@ func normaliseAliases(raw []byte) ([]byte, error) {
 			}
 
 		case yaml.MappingNode:
+			inRule := prefix == ruleSection
+			// 归一后本层出现过的键，用来发现「别名和规范键都写了」
+			seen := make(map[string]*yaml.Node, len(node.Content)/2)
 			for i := 0; i+1 < len(node.Content); i += 2 {
 				keyNode, valNode := node.Content[i], node.Content[i+1]
 
-				if prefix == ruleSection {
-					// 在规则条目内部，接受规范里的键名
-					// severity 用 level，patterns 用 pattern
-					switch keyNode.Value {
-					case "level":
-						keyNode.Value = "severity"
-					case "pattern":
-						keyNode.Value = "patterns"
+				var canonical string
+				if inRule {
+					if c, ok := ruleAliases[keyNode.Value]; ok {
+						canonical = c
 					}
+				} else {
+					path := keyNode.Value
+					if prefix != "" {
+						path = prefix + "." + keyNode.Value
+					}
+					if c, ok := aliases[path]; ok {
+						canonical = lastSegment(c)
+					}
+				}
+
+				// 别名改写后的键名才是本层真正的键。冲突既可能是别名排在已写的
+				// 规范键之后，也可能是规范键排在别名之后，两种都要抓
+				finalName := keyNode.Value
+				if canonical != "" {
+					finalName = canonical
+				}
+				if prev, dup := seen[finalName]; dup {
+					problems = append(problems, fmt.Errorf(
+						"line %d: key %q conflicts with %q on line %d — they mean the same setting; keep only one",
+						keyNode.Line, keyNode.Value, prev.Value, prev.Line))
+					continue
+				}
+				keyNode.Value = finalName
+
+				seen[keyNode.Value] = keyNode
+
+				// 规则里的 pattern 允许写成单个标量，解码成 []string 前先升维
+				if inRule && keyNode.Value == "patterns" && isScalarValue(valNode) {
+					wrapped := &yaml.Node{
+						Kind:    yaml.SequenceNode,
+						Tag:     "!!seq",
+						Line:    valNode.Line,
+						Column:  valNode.Column,
+						Content: []*yaml.Node{valNode},
+					}
+					node.Content[i+1] = wrapped
 					continue
 				}
 
-				path := keyNode.Value
-				if prefix != "" {
-					path = prefix + "." + keyNode.Value
+				if !inRule {
+					path := keyNode.Value
+					if prefix != "" {
+						path = prefix + "." + keyNode.Value
+					}
+					walk(valNode, path)
 				}
-				if canonical, ok := aliases[path]; ok && canonical != path {
-					keyNode.Value = lastSegment(canonical)
-				}
-				walk(valNode, path)
+			}
+
+		case yaml.AliasNode:
+			// 别名指向的内容也要归一，否则 `server: *x` 里的 level 不会被改写成 severity
+			if node.Alias != nil && !visited[node.Alias] {
+				visited[node.Alias] = true
+				walk(node.Alias, prefix)
 			}
 		}
 	}
-	walk(&doc, "")
+	walk(doc, "")
 
-	var buf strings.Builder
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(doc.Content[0]); err != nil {
-		return nil, fmt.Errorf("re-encode: %w", err)
-	}
-	// Close 负责把尾部内容刷进 buf，它的错误也要检查，否则可能静默返回
-	// 一份被截断的 YAML
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("re-encode: %w", err)
-	}
-	return []byte(buf.String()), nil
+	return problems
+}
+
+// isScalarValue 报告节点是否是一个有值的标量（null 不算，它表示「没写」）
+func isScalarValue(node *yaml.Node) bool {
+	return node.Kind == yaml.ScalarNode && node.Tag != "!!null"
 }
 
 // resolvePath 返回要加载的配置文件。explicit 为真表示调用方点名了一个路径，
@@ -337,8 +399,14 @@ func resolvePath(path string) (resolved string, explicit bool, err error) {
 		if err != nil {
 			return "", true, err
 		}
-		if _, err := os.Stat(abs); err != nil {
+		info, err := os.Stat(abs)
+		if err != nil {
 			return "", true, err
+		}
+		// 目录能通过 Stat，随后 ReadFile 才报错，用户拿到的是一条读文件错误
+		// 而不是「你把目录当配置文件传了」
+		if info.IsDir() {
+			return "", true, fmt.Errorf("config path %s is a directory", abs)
 		}
 		return abs, true, nil
 	}
@@ -352,7 +420,9 @@ func resolvePath(path string) (resolved string, explicit bool, err error) {
 	}
 	for _, c := range candidates {
 		if abs, err := filepath.Abs(c); err == nil {
-			if _, err := os.Stat(abs); err == nil {
+			// 同名目录会被 Stat 命中，接着 ReadFile 失败，整个加载就断了。
+			// 隐式扫描本该跳过它继续找下一个候选
+			if info, err := os.Stat(abs); err == nil && !info.IsDir() {
 				return abs, false, nil
 			}
 		}
@@ -360,13 +430,26 @@ func resolvePath(path string) (resolved string, explicit bool, err error) {
 	return "", false, nil
 }
 
-func applyEnv(cfg *Config) {
+// applyEnv 用环境变量覆盖配置，返回这一阶段发现的、被忽略的问题
+//
+// 非法值不覆盖已经合法的配置，也不静默丢弃。一个被忽略的 FIZZRA_PORT 如果不留
+// 告警，用户会以为端口已经改了
+func applyEnv(cfg *Config) []Warning {
+	var warnings []Warning
+	warn := func(field, format string, args ...any) {
+		warnings = append(warnings, Warning{Field: field, Message: fmt.Sprintf(format, args...)})
+	}
+
 	if v := os.Getenv("FIZZRA_HOST"); v != "" {
 		cfg.Server.Host = v
 	}
 	if v := os.Getenv("FIZZRA_PORT"); v != "" {
-		if p, err := parsePort(v); err == nil {
+		if p, err := parseStrictInt(v); err == nil && p >= 1 && p <= 65535 {
 			cfg.Server.Port = p
+		} else if err != nil {
+			warn("FIZZRA_PORT", "%q is not a number; keeping %d", v, cfg.Server.Port)
+		} else {
+			warn("FIZZRA_PORT", "%d is not a valid port; keeping %d", p, cfg.Server.Port)
 		}
 	}
 	if v := os.Getenv("FIZZRA_MODE"); v != "" {
@@ -379,10 +462,15 @@ func applyEnv(cfg *Config) {
 		cfg.Workspace.Root = v
 	}
 	if v := os.Getenv("FIZZRA_CONCURRENCY"); v != "" {
-		if n, err := parsePort(v); err == nil {
+		if n, err := parseStrictInt(v); err == nil && n > 0 {
 			cfg.Scan.Concurrency = n
+		} else if err != nil {
+			warn("FIZZRA_CONCURRENCY", "%q is not a number; keeping %d", v, cfg.Scan.Concurrency)
+		} else {
+			warn("FIZZRA_CONCURRENCY", "%d must be positive; keeping %d", n, cfg.Scan.Concurrency)
 		}
 	}
+	return warnings
 }
 
 // Warning 一个被修正而非致命的问题
@@ -447,20 +535,45 @@ func (c *Config) normalizePaths(def WorkspaceConfig) {
 	}
 	if c.Database.DSN == "" {
 		c.Database.DSN = filepath.Join(c.Workspace.Root, "..", "fizzra.db")
-	} else if !filepath.IsAbs(c.Database.DSN) && c.Database.DSN != ":memory:" {
+	} else if !filepath.IsAbs(c.Database.DSN) && !IsSQLiteURIDSN(c.Database.DSN) {
 		c.Database.DSN = filepath.Join(c.Workspace.Root, c.Database.DSN)
 	}
 }
 
+// IsSQLiteURIDSN 报告该 DSN 是否由驱动直接解释、不该被当成文件路径处理
+//
+// 配置层的路径拼接和存储层的建库目录判断共用这一条规则。两处各写一份时，
+// 边界差一个字符就会出现「配置层认作 URI、存储层当成路径去建目录」的分歧
+func IsSQLiteURIDSN(dsn string) bool {
+	return dsn == ":memory:" || strings.HasPrefix(dsn, "file:")
+}
+
 func (c *Config) normalizeScan(def ScanConfig) {
+	// 负数是被写坏的配置，要告警。0 表示「没写」，按零值填充，与 normalizeServer
+	// 对 Port == 0 的处理一致
+	if c.Scan.Concurrency < 0 {
+		c.warn("scan.concurrency", "%d must not be negative; using %d", c.Scan.Concurrency, def.Concurrency)
+	}
 	if c.Scan.Concurrency <= 0 {
 		c.Scan.Concurrency = def.Concurrency
+	}
+
+	if c.Scan.Timeout < 0 {
+		c.warn("scan.timeout", "%s must not be negative; using %s", c.Scan.Timeout, def.Timeout)
 	}
 	if c.Scan.Timeout <= 0 {
 		c.Scan.Timeout = def.Timeout
 	}
+
+	if c.Scan.PerToolTimeout < 0 {
+		c.warn("scan.perToolTimeout", "%s must not be negative; using %s", c.Scan.PerToolTimeout, def.PerToolTimeout)
+	}
 	if c.Scan.PerToolTimeout <= 0 {
 		c.Scan.PerToolTimeout = def.PerToolTimeout
+	}
+
+	if c.Scan.MaxIssues < 0 {
+		c.warn("scan.maxIssues", "%d must not be negative; using %d", c.Scan.MaxIssues, def.MaxIssues)
 	}
 	if c.Scan.MaxIssues <= 0 {
 		c.Scan.MaxIssues = def.MaxIssues
@@ -514,7 +627,13 @@ func (c *Config) Addr() string {
 }
 
 func parsePort(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+	return parseStrictInt(s)
+}
+
+// parseStrictInt 严格解析整数字串，拒绝尾部夹带非数字字符的输入
+//
+// 环境变量里出现 "8080abc" 这种值几乎总是手滑，解析出一个前缀数字就当作有效会
+// 让用户以为设置已生效，因此整串必须是合法整数
+func parseStrictInt(s string) (int, error) {
+	return strconv.Atoi(strings.TrimSpace(s))
 }

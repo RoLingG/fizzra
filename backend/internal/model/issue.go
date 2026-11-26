@@ -100,20 +100,20 @@ type Issue struct {
 	Analyzer string   `json:"analyzer" gorm:"index;size:64"`
 	Rule     string   `json:"rule" gorm:"index;size:128"`
 	Severity Severity `json:"severity" gorm:"index;size:16"`
-	// SeverityRank 是 severity 的数值形式，供 ORDER BY 使用
+	// SeverityRank severity 的数值形式，供 ORDER BY 使用
 	// 字符串排序按字母序，会把 info 排在 warning 前面
 	SeverityRank int    `json:"-" gorm:"index"`
 	Message      string `json:"message" gorm:"type:text"`
-	// Advice 是可选的修复提示，来自工具或匹配到的自定义规则
+	// Advice 可选的修复提示，来自工具或匹配到的自定义规则
 	Advice string `json:"advice" gorm:"type:text"`
-	// Fix 是修改前后对照示例，从产生该问题时的规则复制而来
+	// Fix 修改前后对照示例，从产生该问题时的规则复制而来
 	// 存在这里而不是关联到规则上，历史发现因此保留它当时被报出来时的指导，
 	// 即便规则之后被改过或删掉
 	Fix    FixExample `json:"fix" gorm:"type:text"`
 	File   string     `json:"file" gorm:"size:512"`
 	Line   int        `json:"line"`
 	Column int        `json:"column"`
-	// Code 是出问题的源码片段，分析器能提供时才有
+	// Code 出问题的源码片段，分析器能提供时才有
 	Code string `json:"code" gorm:"type:text"`
 	// DocURL 在已知时指向上游规则文档
 	DocURL string `json:"docUrl" gorm:"size:512"`
@@ -126,10 +126,9 @@ type Issue struct {
 	// Status 默认为 open，用户可以把问题标为已忽略或误报
 	Status string `json:"status" gorm:"index;size:24;default:open"`
 
-	// Origin 说明问题在哪，项目自己的代码里，还是它没写过的依赖里
-	// 两者可采取的行动不同，源码里的缺陷该由作者修，传递依赖的通告通常只能靠升级引入
-	// 它的那个东西消化。一视同仁会让一长串 CVE 通告看起来像读者做错的事
-	// 为空表示项目自己的代码
+	// Origin 说明问题在哪，项目自己的代码里，还是它没写过的依赖里两者可采取的行动不同，
+	// 源码里的缺陷该由作者修，传递依赖的通告通常只能靠升级引入它的那个东西消化。
+	// 一视同仁会让一长串 CVE 通告看起来像读者做错的事为空表示项目自己的代码
 	Origin string `json:"origin" gorm:"index;size:24"`
 	// DependencyPath 给出引入第三方发现的那条依赖链，最外层在前
 	// 对 OriginSource 和直接依赖里的发现都为空，此时链路就是那个包本身

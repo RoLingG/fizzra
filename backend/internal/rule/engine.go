@@ -55,7 +55,7 @@ type Engine struct {
 	skipped []error
 	// minSeverity 过滤掉低于调用方关注等级的规则
 	minSeverity model.Severity
-	// maxFileBytes 防止去扫描那些 vendored 或生成的巨型文件
+	// maxFileBytes 防止去扫描那些 vendored 或生成的巨型文件，固定 2 MiB
 	maxFileBytes int64
 	// syntax 提供该项目语言的词法规则。默认是 Go，也就是现有调用方都需要的那种
 	syntax Syntax
@@ -67,11 +67,6 @@ type Option func(*Engine)
 // WithMinSeverity 丢弃低于所给等级的匹配
 func WithMinSeverity(s model.Severity) Option {
 	return func(e *Engine) { e.minSeverity = s }
-}
-
-// WithMaxFileSize 设置单文件大小上限，单位为字节（0 表示不限）
-func WithMaxFileSize(n int64) Option {
-	return func(e *Engine) { e.maxFileBytes = n }
 }
 
 // WithLanguage 选择过滤器使用的词法
@@ -426,6 +421,17 @@ func computeBraceScopes(lines []string, syntax Syntax) []matchContext {
 
 // scanStringState 返回行末仍未闭合的定界符的下标，全部闭合时返回 -1
 func scanStringState(line string, syntax Syntax) int {
+	return scanString(line, len(line), syntax)
+}
+
+// scanString 走到 limit 为止，返回那一刻仍未闭合的定界符下标，没有则为 -1
+//
+// 按语言区分而不是只针对 Go，Go 的反引号是原始的，JS 模板字面量会处理转义，
+// Python 的三引号自带定界符，Rust 有原始字符串。写死一套引号至少会把其中一种
+// 弄错，而表现出来的症状就是规则在它自己的模式上命中
+//
+// 语法定义里的定界符按最长优先排序，三引号因此不会被读成两个双引号加一个双引号
+func scanString(line string, limit int, syntax Syntax) int {
 	delims := syntax.StringDelims()
 	if len(delims) == 0 {
 		return -1
@@ -434,11 +440,12 @@ func scanStringState(line string, syntax Syntax) int {
 	activeIdx := -1
 	escaped := false
 
-	for i := 0; i < len(line); i++ {
+	for i := 0; i < len(line) && i < limit; i++ {
 		if escaped {
 			escaped = false
 			continue
 		}
+
 		if activeIdx >= 0 {
 			d := delims[activeIdx]
 			if !d.Raw && d.Escape != 0 && line[i] == d.Escape {
@@ -451,6 +458,8 @@ func scanStringState(line string, syntax Syntax) int {
 			}
 			continue
 		}
+
+		// 不在字面量里：找开引号
 		for idx, d := range delims {
 			if !strings.HasPrefix(line[i:], d.Open) {
 				continue
@@ -465,6 +474,7 @@ func scanStringState(line string, syntax Syntax) int {
 			break
 		}
 	}
+
 	return activeIdx
 }
 
@@ -562,8 +572,7 @@ func computeIndentScopes(lines []string, syntax Syntax) []matchContext {
 // advanceBlockComment 为一行更新未闭合块注释的深度
 //
 // 语言声明支持嵌套时会按嵌套处理，这对 Rust 很要紧，把 `/* /* */ */` 当成单个
-// 注释会在第一个 `*/` 处结束，然后把后面那个 `*/` 当成代码读，规则于是可能在
-// 注释文字上触发
+// 注释会在第一个 `*/` 处结束，然后把后面那个 `*/` 当成代码读，规则于是可能在注释文字上触发
 func advanceBlockComment(depth int, line string, c CommentSyntax, syntax Syntax) int {
 	if c.BlockOpen == "" || c.BlockClose == "" {
 		return 0
@@ -572,13 +581,13 @@ func advanceBlockComment(depth int, line string, c CommentSyntax, syntax Syntax)
 	i := 0
 	for {
 		if depth > 0 {
-			close := strings.Index(line[i:], c.BlockClose)
-			if close < 0 {
+			closeAt := strings.Index(line[i:], c.BlockClose)
+			if closeAt < 0 {
 				return depth
 			}
-			close += i
+			closeAt += i
 			depth--
-			i = close + len(c.BlockClose)
+			i = closeAt + len(c.BlockClose)
 			if !c.BlockNests {
 				// 不支持嵌套的语言在第一个闭合处就停，不管前面有多少个开
 				depth = 0
@@ -610,11 +619,11 @@ func advanceBlockComment(depth int, line string, c CommentSyntax, syntax Syntax)
 
 		if !c.BlockNests {
 			// 找配对的闭合，找不到说明注释一直到文件末尾
-			close := strings.Index(line[i:], c.BlockClose)
-			if close < 0 {
+			closeAt := strings.Index(line[i:], c.BlockClose)
+			if closeAt < 0 {
 				return 1
 			}
-			i += close + len(c.BlockClose)
+			i += closeAt + len(c.BlockClose)
 			depth = 0
 		}
 	}
@@ -769,57 +778,8 @@ func offsetInStringLiteral(line string, offset int, syntax Syntax) bool {
 }
 
 // openStringAt 走完该行直到 offset，报告那一刻是否有字符串字面量处于打开状态
-//
-// 按语言区分而不是只针对 Go，Go 的反引号是原始的，JS 模板字面量会处理转义，
-// Python 的三引号自带定界符，Rust 有原始字符串。写死一套引号至少会把其中一种
-// 弄错，而表现出来的症状就是规则在它自己的模式上命中
 func openStringAt(line string, offset int, syntax Syntax) bool {
-	delims := syntax.StringDelims()
-	if len(delims) == 0 {
-		return false
-	}
-
-	// delims 中哪一项是打开的，-1 表示没有
-	activeIdx := -1
-	escaped := false
-
-	for i := 0; i < len(line) && i < offset; i++ {
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		if activeIdx >= 0 {
-			d := delims[activeIdx]
-			if !d.Raw && d.Escape != 0 && line[i] == d.Escape {
-				escaped = true
-				continue
-			}
-			if strings.HasPrefix(line[i:], d.Close) {
-				activeIdx = -1
-				i += len(d.Close) - 1
-			}
-			continue
-		}
-
-		// 不在字面量里：找开引号
-		// 语法定义里这个切片按最长优先排序，所以三引号不会被读成两个双引号加一个双引号
-		for idx, d := range delims {
-			if !strings.HasPrefix(line[i:], d.Open) {
-				continue
-			}
-			// 像 Rust 的原始字符串前缀那种形式不能是标识符的尾部
-			// `var` 后面跟一个引号不是原始字符串
-			if len(d.Open) > 1 && isIdentChar(d.Open[0]) && i > 0 && isIdentChar(line[i-1]) {
-				continue
-			}
-			activeIdx = idx
-			i += len(d.Open) - 1
-			break
-		}
-	}
-
-	return activeIdx >= 0
+	return scanString(line, offset, syntax) >= 0
 }
 
 // offsetInComment 报告所给偏移处的字节是否位于注释中

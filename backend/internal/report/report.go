@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -363,9 +364,7 @@ func WriteHTML(w io.Writer, r Report, lang string) error {
 		// 聚合出来的 RuleStat.Severity 是普通字符串，模板里同样要翻
 		"severityWord": s.wordFor,
 	}
-	for k, v := range localized {
-		funcs[k] = v
-	}
+	maps.Copy(funcs, localized)
 
 	tmpl, err := template.New("report").Funcs(funcs).Parse(reportTemplate)
 	if err != nil {

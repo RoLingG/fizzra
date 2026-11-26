@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rolingg/fizzra/backend/internal/model"
 )
 
 // Rust 分析，基于 clippy
@@ -751,9 +753,8 @@ func auditAdvice(informational *string, aliases, patched []string, origin string
 		parts = append(parts, fmt.Sprintf("This is an informational advisory (%s), not a known exploit.", *informational))
 	}
 
-	if origin == OriginTransitive && len(depPath) > 1 {
-		// depPath 以受影响的包结尾，所以它前一项就是该动的那个依赖，那才是这条链里
-		// 可操作的部分
+	if origin == model.OriginTransitive && len(depPath) > 1 {
+		// depPath 以受影响的包结尾，所以它前一项就是该动的那个依赖，那才是这条链里可操作的部分
 		parts = append(
 			parts,
 			fmt.Sprintf(

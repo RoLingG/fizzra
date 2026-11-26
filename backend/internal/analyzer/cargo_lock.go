@@ -6,19 +6,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/rolingg/fizzra/backend/internal/model"
 )
 
-// 依赖类发现的来源取值
-//
-// 声明在这里而不是复用 model.Origin*，是为了让本包不沾持久层模型，与分析器包的
-// 其余部分一致。两组取值在 service 层的映射里有断言保证相等，一旦漂移会以测试
-// 失败的形式暴露，而不是变成静默匹配不上的字符串
-const (
-	// OriginDirect 项目自己声明的依赖
-	OriginDirect = "direct"
-	// OriginTransitive 只能经由另一个依赖到达的依赖
-	OriginTransitive = "transitive"
-)
+// 依赖类发现的来源取自 model.Origin*，不在本包另设副本：
+// 同一个值两份定义时，改一处另一处不会报错，只会静默匹配不上
 
 /*
  * Cargo.lock dependency graph.
@@ -240,9 +233,9 @@ func (g *CargoLockGraph) Origin(name, version string) string {
 	}
 	// 长度为 1 的路径意味着该包是某个工作区成员的直接依赖，也就是读者自己声明的
 	if len(path) <= 1 {
-		return OriginDirect
+		return model.OriginDirect
 	}
-	return OriginTransitive
+	return model.OriginTransitive
 }
 
 // Path 返回引入某个包的依赖链，最外层在前，包名本身在最后

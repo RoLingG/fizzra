@@ -13,6 +13,12 @@ import (
 type Data interface {
 	Migrate() error
 
+	// WithTx 在一个事务里执行 fn，fn 拿到的是绑定到该事务的 Data
+	//
+	// 跨表操作必须走它。删除一个项目要按顺序清掉问题、分析、门禁和项目本身，
+	// 分四次独立删除时中途失败会留下「项目还在、分析没了」的脏数据
+	WithTx(fn func(Data) error) error
+
 	Projects() ProjectRepo
 	Analyses() AnalysisRepo
 	Issues() IssueRepo

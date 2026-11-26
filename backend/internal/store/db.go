@@ -23,7 +23,7 @@ type DB struct {
 // Open 连接配置好的数据库并执行迁移
 func Open(cfg *config.Config, log *slog.Logger) (*DB, error) {
 	dsn := cfg.Database.DSN
-	if dsn != ":memory:" && !isURI(dsn) {
+	if !config.IsSQLiteURIDSN(dsn) {
 		dir := filepath.Dir(dsn)
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("create database directory %s: %w", dir, err)
@@ -47,6 +47,11 @@ func Open(cfg *config.Config, log *slog.Logger) (*DB, error) {
 
 	if dsn != ":memory:" {
 		if err := applySQLitePragmas(gdb); err != nil {
+			// 连接池已经建好了，不关就随进程活到最后
+			// 调用方拿到错误后不会再用这个 db
+			if sqlDB, closeErr := gdb.DB(); closeErr == nil {
+				_ = sqlDB.Close()
+			}
 			return nil, err
 		}
 	}
@@ -54,9 +59,11 @@ func Open(cfg *config.Config, log *slog.Logger) (*DB, error) {
 	return &DB{DB: gdb, log: log}, nil
 }
 
-// isURI 报告该 DSN 是否为完整的连接 URI（例如 "file::memory:"）
+// isURI 报告该 DSN 是否由驱动直接解释的完整连接串
+//
+// 与配置层共用同一条规则，见 config.IsSQLiteURIDSN
 func isURI(dsn string) bool {
-	return len(dsn) > 5 && dsn[:5] == "file:"
+	return config.IsSQLiteURIDSN(dsn)
 }
 
 // sqliteDSN 加上我们希望在每条连接上生效的 pragma
@@ -64,8 +71,7 @@ func sqliteDSN(dsn string) string {
 	if isURI(dsn) {
 		return dsn
 	}
-	// _busy_timeout 避免接口和任务 worker 并发写入时出现 "database is locked"，
-	// WAL 通过 PRAGMA 单独设置
+	// _busy_timeout 避免接口和任务 worker 并发写入时出现 "database is locked"，WAL 通过 PRAGMA 单独设置
 	return dsn + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 }
 

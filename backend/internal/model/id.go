@@ -10,8 +10,7 @@ import (
 
 // NewID 返回带所给前缀的短标识，大致可排序，例如 "prj_9f2c1a4b3d5e6f70"
 //
-// 刻意不引入 UUID 依赖，16 字节随机十六进制后缀对单节点工具来说碰撞概率足够低，
-// 在 URL 里也更好读
+// 刻意不引入 UUID 依赖，16 字节随机十六进制后缀对单节点工具来说碰撞概率足够低，在 URL 里也更好读
 func NewID(prefix string) string {
 	buf := make([]byte, 8)
 	if _, err := rand.Read(buf); err != nil {

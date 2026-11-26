@@ -22,9 +22,6 @@ const (
 	FormatSARIF Format = "sarif"
 )
 
-// AllFormats 是全部可选格式，按给人看的顺序排列，供界面直接使用
-var AllFormats = []Format{FormatHTML, FormatJSON, FormatSARIF}
-
 // ParseFormat 解析调用方给的格式名
 //
 // 空串当作 HTML，命令行和面板都以 HTML 为默认，这也是「什么都没指定」时最可能的

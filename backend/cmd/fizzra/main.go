@@ -477,11 +477,13 @@ func mergeConfigRule(r *model.Rule, rc config.RuleConfig) {
 		r.Enabled = *rc.Enabled
 	}
 	r.Builtin = r.Builtin || rc.Builtin
-	// 这两个字段在 config.RuleConfig 里是普通 bool，零值分不清「没写」和「写 false」。
-	// 直接赋值会让只改 severity 的覆盖把内置规则的循环作用域抹掉，所以取并集止血；
-	// 要支持显式关闭需把 internal/config 对应字段改成 *bool（模块 2）
-	r.RequireLoop = r.RequireLoop || rc.RequireLoop
-	r.ForbidInLoop = r.ForbidInLoop || rc.ForbidInLoop
+	// 没写（nil）保留内置规则原有的作用域限定，写了就照办，包括显式 false 关闭它
+	if rc.RequireLoop != nil {
+		r.RequireLoop = *rc.RequireLoop
+	}
+	if rc.ForbidInLoop != nil {
+		r.ForbidInLoop = *rc.ForbidInLoop
+	}
 }
 
 // ---------------------------------------------------------------------------
