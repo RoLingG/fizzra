@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,8 @@ type Enqueuer interface {
 	Enqueue(analysisID string) error
 	// Running 报告有多少任务在执行中，供系统接口使用
 	Running() int
+	// Cancel 中止一次正在执行的分析
+	Cancel(analysisID string) bool
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +82,7 @@ func normalizeLanguageKind(language, kind string) (string, string, error) {
 	if language == "" {
 		language = model.LanguageGo
 	}
-	if !model.ValidLanguage(language) {
+	if !slices.Contains(model.AllLanguages, language) {
 		return "", "", fmt.Errorf(
 			"%w: language %q is not supported (valid: %v)",
 			ErrInvalid, language, model.AllLanguages)
@@ -298,7 +301,7 @@ func (s *Service) UpdateProject(ctx context.Context, id string, in UpdateProject
 	}
 	if in.Language != nil && *in.Language != project.Language {
 		language := *in.Language
-		if !model.ValidLanguage(language) {
+		if !slices.Contains(model.AllLanguages, language) {
 			return nil, fmt.Errorf(
 				"%w: language %q is not supported (valid: %v)",
 				ErrInvalid, language, model.AllLanguages)
@@ -368,22 +371,24 @@ func (s *Service) DeleteProject(ctx context.Context, id string) error {
 
 // deleteProjectRows 按正确顺序抹掉一个项目及其派生数据
 //
-// 顺序很重要，问题引用分析，分析引用项目，所以从叶子往根删。抽成函数是为了让
-// 单个删除和批量删除共用同一实现，两份拷贝迟早会漂移，代价是删不干净或删错东西
+// 顺序很重要，问题引用分析，分析引用项目，所以从叶子往根删。整组删除放在一个
+// 事务里，中途失败不会留下「项目还在、分析没了」这种删了一半的状态
 func (s *Service) deleteProjectRows(id string) error {
-	if err := s.Data.Issues().DeleteByProject(id); err != nil {
-		return fmt.Errorf("delete issues: %w", err)
-	}
-	if err := s.Data.Analyses().DeleteByProject(id); err != nil {
-		return fmt.Errorf("delete analyses: %w", err)
-	}
-	if err := s.Data.QualityGates().Delete(id); err != nil {
-		return fmt.Errorf("delete quality gate: %w", err)
-	}
-	if err := s.Data.Projects().Delete(id); err != nil {
-		return fmt.Errorf("delete project: %w", err)
-	}
-	return nil
+	return s.Data.WithTx(func(tx store.Data) error {
+		if err := tx.Issues().DeleteByProject(id); err != nil {
+			return fmt.Errorf("delete issues: %w", err)
+		}
+		if err := tx.Analyses().DeleteByProject(id); err != nil {
+			return fmt.Errorf("delete analyses: %w", err)
+		}
+		if err := tx.QualityGates().Delete(id); err != nil {
+			return fmt.Errorf("delete quality gate: %w", err)
+		}
+		if err := tx.Projects().Delete(id); err != nil {
+			return fmt.Errorf("delete project: %w", err)
+		}
+		return nil
+	})
 }
 
 // DeleteProjects 删除多个项目及其派生数据，返回实际删掉的 ID
@@ -573,6 +578,30 @@ func (s *Service) RunAnalysis(ctx context.Context, analysisID string) error {
 		return fmt.Errorf("analysis engine is not configured")
 	}
 	return s.Engine.Run(ctx, analysisID)
+}
+
+// CancelAnalysis 中止一次正在执行的分析
+//
+// 只有已经跑起来的才能停。排队中的任务取消不了，因为它的执行上下文还没建出来，
+// 这种情况返回 ErrInvalid 让调用方知道状态没变
+func (s *Service) CancelAnalysis(ctx context.Context, id string) error {
+	// 调用方已经断开时不必再取消，省一次查询
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	analysis, err := s.Data.Analyses().Get(id)
+	if err != nil {
+		return err
+	}
+	if analysis.Status != model.StatusRunning && analysis.Status != model.StatusPending {
+		return fmt.Errorf("%w: analysis is %s, nothing to cancel", ErrInvalid, analysis.Status)
+	}
+	if s.Enqueuer == nil || !s.Enqueuer.Cancel(id) {
+		return fmt.Errorf("%w: analysis %s is queued but not running yet", ErrInvalid, id)
+	}
+	s.Log.Info("analysis canceled", "id", id)
+	return nil
 }
 
 // GetAnalysis 按 ID 返回分析

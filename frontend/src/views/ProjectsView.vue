@@ -517,6 +517,19 @@ async function scan(project: ProjectSummary) {
   }
 }
 
+async function cancelScan(project: ProjectSummary) {
+  const analysisId = project.inFlight?.id
+  if (!analysisId) return
+  try {
+    const { analysisApi } = await import('@/api/client')
+    await analysisApi.cancel(analysisId)
+    ElMessage.success(t('projectsView.scanCanceled', { name: project.name }))
+    void load()
+  } catch (error) {
+    reportError(error, t('errors.cancelScan'))
+  }
+}
+
 // 扫描状态变化时只刷新受影响的项目，避免整表重载闪烁
 useScanEvents(
   (ev) => {
@@ -719,6 +732,16 @@ onMounted(load)
         <template #default="{ row }">
           <div class="actions">
             <el-button
+              v-if="isScanning(row)"
+              size="small"
+              text
+              :icon="'Close'"
+              @click.stop="cancelScan(row)"
+            >
+              {{ t('common.cancel') }}
+            </el-button>
+            <el-button
+              v-else
               size="small"
               text
               :icon="'Refresh'"

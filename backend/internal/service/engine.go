@@ -218,11 +218,16 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		a.FinishedAt = new(time.Now())
 		a.DurationMS = time.Since(started).Milliseconds()
 		a.Progress = 100
-		if runErr != nil {
+		switch {
+		case runErr == nil:
+			a.Status = model.StatusSuccess
+		case errors.Is(runErr, context.Canceled):
+			// 用户主动停下的和出错的不是一回事，界面要分开显示
+			a.Status = model.StatusCanceled
+			a.Error = ""
+		default:
 			a.Status = model.StatusFailed
 			a.Error = failureDetail(runErr)
-		} else {
-			a.Status = model.StatusSuccess
 		}
 		e.setProgress(analysisID, project.ID, 100, "done")
 		if err := e.Data.Analyses().Update(a); err != nil {
@@ -305,6 +310,12 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 	}
 
 	results, metrics := e.runAnalyzers(actx, analyzers, analysisID, project.ID)
+
+	// 取消或超时后不再往下走。分析器把 ctx 错误记在自己身上，但那只是
+	// 「这个分析器失败了」，整次运行还得自己认领，否则取消会被记成成功
+	if err := runCtx.Err(); err != nil {
+		return finish(analysis, err)
+	}
 
 	// 被语言过滤掉的名字并入 results，下面的跳过统计只需遍历一份列表。它们标记为
 	// Skipped 且不携带发现，不影响评分和问题列表

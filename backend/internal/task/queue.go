@@ -32,6 +32,8 @@ type Queue interface {
 	Start(ctx context.Context)
 	// Stop 中止执行中的任务，未完成的分析标成失败
 	Stop(ctx context.Context) error
+	// Cancel 中止一次正在进行的分析，返回该分析是否在执行中
+	Cancel(analysisID string) bool
 }
 
 // MemoryQueue 进程内的有界 worker 池
@@ -55,6 +57,10 @@ type MemoryQueue struct {
 	stopCh    chan struct{}
 	// stopRun 停止时取消 worker 的运行 ctx，正在跑的分析随之退出
 	stopRun context.CancelFunc
+
+	// mu 保护 cancels。用户取消与 worker 完成可能同时发生
+	mu      sync.Mutex
+	cancels map[string]context.CancelFunc
 }
 
 // Config 用于调整队列
@@ -88,12 +94,13 @@ func NewMemoryQueue(cfg Config, runner Runner, data store.Data, log *slog.Logger
 		cfg.BufferSize = 16
 	}
 	return &MemoryQueue{
-		cfg:    cfg,
-		log:    log,
-		runner: runner,
-		data:   data,
-		tasks:  make(chan string, cfg.BufferSize),
-		stopCh: make(chan struct{}),
+		cfg:     cfg,
+		log:     log,
+		runner:  runner,
+		data:    data,
+		tasks:   make(chan string, cfg.BufferSize),
+		stopCh:  make(chan struct{}),
+		cancels: map[string]context.CancelFunc{},
 	}
 }
 
@@ -280,7 +287,19 @@ func (q *MemoryQueue) runOne(ctx context.Context, workerID int, analysisID strin
 
 	log.Info("analysis started")
 
-	if err := q.runner.RunAnalysis(ctx, analysisID); err != nil {
+	// 每次运行一个可单独取消的 ctx，用户取消时只中断这一次，不影响 worker
+	runCtx, cancel := context.WithCancel(ctx)
+	q.mu.Lock()
+	q.cancels[analysisID] = cancel
+	q.mu.Unlock()
+	defer func() {
+		cancel()
+		q.mu.Lock()
+		delete(q.cancels, analysisID)
+		q.mu.Unlock()
+	}()
+
+	if err := q.runner.RunAnalysis(runCtx, analysisID); err != nil {
 		q.failed.Add(1)
 		log.Error("analysis failed", "err", err, "duration", time.Since(start).Round(time.Millisecond))
 		return
@@ -288,6 +307,21 @@ func (q *MemoryQueue) runOne(ctx context.Context, workerID int, analysisID strin
 
 	q.done.Add(1)
 	log.Info("analysis finished", "duration", time.Since(start).Round(time.Millisecond))
+}
+
+// Cancel 中止一次正在进行的分析
+//
+// 只对已开始执行的分析有效；排队中的任务会正常跑完，因为它的 ctx 还没建出来。
+// 返回 false 表示该分析不在执行中
+func (q *MemoryQueue) Cancel(analysisID string) bool {
+	q.mu.Lock()
+	cancel, ok := q.cancels[analysisID]
+	q.mu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
 }
 
 // markFailed 记录一次崩溃的分析，免得它永远停在 running

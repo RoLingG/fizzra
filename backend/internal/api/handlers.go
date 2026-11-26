@@ -190,6 +190,21 @@ func (h *Handler) startAnalysis(c *gin.Context) {
 	c.JSON(202, Response{Data: analysis})
 }
 
+// cancelAnalysis 中止一次正在执行的分析
+func (h *Handler) cancelAnalysis(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.Svc.CancelAnalysis(c.Request.Context(), id); err != nil {
+		h.fail(c, err)
+		return
+	}
+	analysis, err := h.Svc.GetAnalysis(c.Request.Context(), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	ok(c, analysis)
+}
+
 func (h *Handler) getAnalysis(c *gin.Context) {
 	analysis, err := h.Svc.GetAnalysis(c.Request.Context(), c.Param("id"))
 	if err != nil {

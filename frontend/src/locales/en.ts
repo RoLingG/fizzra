@@ -320,6 +320,7 @@ const en = {
     saveGate: 'Could not save the quality gate.',
     updateIssue: 'Could not update the issue.',
     startScan: 'Could not start the scan.',
+    cancelScan: 'Could not cancel the scan.',
     copyFailed: 'Select the text and copy it manually.',
   },
 
@@ -480,6 +481,7 @@ const en = {
     scanStageScoring: 'scoring',
     scanFailed: 'Scan failed',
     scanQueued: 'Scan queued for {name}.',
+    scanCanceled: 'Canceled the scan for {name}.',
     editTitle: 'Edit project',
     addTitle: 'Add project',
     formName: 'Name',

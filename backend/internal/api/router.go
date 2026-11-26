@@ -75,6 +75,7 @@ func NewRouter(h *Handler, opts RouterOptions) *gin.Engine {
 		{
 			analyses.POST("", h.startAnalysis)
 			analyses.GET("/:id", h.getAnalysis)
+			analyses.POST("/:id/cancel", h.cancelAnalysis)
 			analyses.GET("/:id/issues", h.listIssues)
 			analyses.GET("/:id/stats", h.analysisStats)
 		}

@@ -192,6 +192,11 @@ export const analysisApi = {
     return unwrap(data)
   },
 
+  async cancel(id: string): Promise<Analysis> {
+    const { data } = await http.post<Envelope<Analysis>>(`/analyses/${encodeURIComponent(id)}/cancel`)
+    return unwrap(data)
+  },
+
   async listForProject(projectId: string, limit = 50): Promise<Analysis[]> {
     const { data } = await http.get<Envelope<Analysis[]>>(`/projects/${encodeURIComponent(projectId)}/analyses`, {
       params: { limit },

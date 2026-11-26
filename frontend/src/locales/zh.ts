@@ -322,6 +322,7 @@ const zh: Catalogue<typeof en> = {
     saveGate: '保存质量门禁失败。',
     updateIssue: '更新问题失败。',
     startScan: '启动扫描失败。',
+    cancelScan: '取消扫描失败。',
     copyFailed: '请手动选中文本后复制。',
   },
 
@@ -477,6 +478,7 @@ const zh: Catalogue<typeof en> = {
     scanStageScoring: '计算分数',
     scanFailed: '扫描失败',
     scanQueued: '已为 {name} 排队扫描。',
+    scanCanceled: '已取消 {name} 的扫描。',
     editTitle: '编辑项目',
     addTitle: '添加项目',
     formName: '名称',
