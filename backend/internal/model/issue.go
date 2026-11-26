@@ -120,31 +120,30 @@ type Issue struct {
 	// Fingerprint 是跨分析匹配问题时用的稳定哈希，界面因此能区分新发现和已有的
 	Fingerprint string `json:"fingerprint" gorm:"index;size:64"`
 	// IsNew 表示该项目最近的成功分析里都没有同一指纹
-	// 是「最近」而不是「上一次」，基线覆盖项目近期的分析历史，所以一个修好后又复现的问题
-	// 会被告知为已知而不是新增。落库是为了让「只看新增」成为一次带索引的比较
+	// 是「最近」而不是「上一次」，基线覆盖项目近期的分析历史，所以一个修好后又复现的
+	// 问题会被告知为已知而不是新增。落库是为了让「只看新增」成为一次带索引的比较
 	IsNew bool `json:"isNew" gorm:"index"`
 	// Status 默认为 open，用户可以把问题标为已忽略或误报
 	Status string `json:"status" gorm:"index;size:24;default:open"`
 
-	// Origin 说明问题在哪，项目自己的代码里，还是它没写过的依赖里两者可采取的行动不同，
-	// 源码里的缺陷该由作者修，传递依赖的通告通常只能靠升级引入它的那个东西消化。
-	// 一视同仁会让一长串 CVE 通告看起来像读者做错的事为空表示项目自己的代码
+	// Origin 说明问题在哪，项目自己的代码里，还是它没写过的依赖里
+	// 两者可采取的行动不同，源码里的缺陷该由作者修，传递依赖的通告通常只能靠升级
+	// 引入它的那个东西消化。一视同仁会让一长串 CVE 通告看起来像读者做错的事
+	// 为空表示项目自己的代码
 	Origin string `json:"origin" gorm:"index;size:24"`
 	// DependencyPath 给出引入第三方发现的那条依赖链，最外层在前
-	// 对 OriginSource 和直接依赖里的发现都为空，此时链路就是那个包本身
+	// 项目自身代码和直接依赖里的发现都为空，此时链路就是那个包本身
 	DependencyPath MultiString `json:"dependencyPath" gorm:"type:text"`
 
 	CreatedAt time.Time `json:"createdAt"`
 }
 
 // 问题来源取值
+// 空字符串表示项目自己代码里的发现，即默认情况，不需要常量
 const (
-	// OriginSource 是项目自己代码里的发现，即分析器读的是用户写的文件，这是默认值
-	OriginSource = ""
 	// OriginDirect 是项目自己声明的依赖，读者改动自己的清单文件就能处理
 	OriginDirect = "direct"
-	// OriginTransitive 只能经由另一个依赖到达的依赖
-	// 读者无法直接修好它，解决办法在上游维护者手里
+	// OriginTransitive 只能经由另一个依赖到达的依赖，读者无法直接修好它，解决办法在依赖上游维护者手里
 	OriginTransitive = "transitive"
 )
 

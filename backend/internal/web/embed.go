@@ -38,8 +38,3 @@ func Dist() fs.FS {
 	}
 	return sub
 }
-
-// Available 报告二进制里是否嵌入了构建好的仪表盘
-func Available() bool {
-	return Dist() != nil
-}

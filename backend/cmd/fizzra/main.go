@@ -517,9 +517,15 @@ func cmdServe(app *App, args []string) int {
 	// SSE 连接不会自行结束，server.Shutdown 会一直等它们。把关闭信号交给 handler
 	// 主动收尾，Ctrl+C 才能立即退出而不是等到超时
 	handler.Shutdown = ctx.Done()
+	dashboard := web.Dist()
+	if dashboard == nil {
+		// 没有仪表盘时根路径会返回一段说明页，但那要等用户打开浏览器才看得到。
+		// 部署漏跑 go generate 时，这条日志是唯一的线索
+		app.Log.Warn("dashboard is not embedded; run `go generate ./...` before building to include it")
+	}
 	router := api.NewRouter(handler, api.RouterOptions{
 		Config:   cfg,
-		StaticFS: web.Dist(),
+		StaticFS: dashboard,
 	})
 
 	server := &http.Server{

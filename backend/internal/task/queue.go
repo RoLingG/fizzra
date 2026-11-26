@@ -281,7 +281,7 @@ func (q *MemoryQueue) runOne(ctx context.Context, workerID int, analysisID strin
 		if r := recover(); r != nil {
 			q.failed.Add(1)
 			log.Error("analysis panicked", "panic", fmt.Sprint(r), "duration", time.Since(start))
-			q.markFailed(ctx, analysisID, fmt.Sprintf("internal panic: %v", r))
+			q.markFailed(analysisID, fmt.Sprintf("internal panic: %v", r))
 		}
 	}()
 
@@ -325,7 +325,7 @@ func (q *MemoryQueue) Cancel(analysisID string) bool {
 }
 
 // markFailed 记录一次崩溃的分析，免得它永远停在 running
-func (q *MemoryQueue) markFailed(ctx context.Context, analysisID, reason string) {
+func (q *MemoryQueue) markFailed(analysisID, reason string) {
 	analysis, err := q.data.Analyses().Get(analysisID)
 	if err != nil {
 		q.log.Error("cannot mark analysis failed", "analysis", analysisID, "err", err)

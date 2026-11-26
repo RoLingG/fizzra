@@ -317,8 +317,8 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 		return finish(analysis, err)
 	}
 
-	// 被语言过滤掉的名字并入 results，下面的跳过统计只需遍历一份列表。它们标记为
-	// Skipped 且不携带发现，不影响评分和问题列表
+	// 被语言过滤掉的名字并入 results，下面的跳过统计只需遍历一份列表。
+	// 它们标记为 Skipped 且不携带发现，不影响评分和问题列表
 	results = append(results, excluded...)
 
 	e.setProgress(analysisID, project.ID, 80, "saving results")
@@ -455,8 +455,7 @@ func (e *Engine) Run(ctx context.Context, analysisID string) error {
 			}
 		}
 	}
-	// 只数成功跑完的，CI 的 --allow-skipped 靠它区分「度量跑了、检查跳过了」
-	// 和「一个都没跑」
+	// 只数成功跑完的，CI 的 --allow-skipped 靠它区分「度量跑了、检查跳过了」和「一个都没跑」
 	analysis.AnalyzersCompleted = completed
 
 	// 每次扫描都记录跳过，否则漏掉半数检查的扫描与跑全了却没问题的无法区分
@@ -743,8 +742,7 @@ func (e *Engine) resolveAnalyzers(analysis *model.Analysis, lang string) ([]anal
 	}
 
 	if len(analyzers) == 0 {
-		// 区分「一个都没选」与「全被语言过滤掉」，后者发生在该语言还没有分析器时，
-		// 调用方据此报不完整而不是干净
+		// 区分「一个都没选」与「全被语言过滤掉」，后者发生在该语言还没有分析器时，调用方据此报不完整而不是干净
 		skipped := e.Registry.SkippedForLanguage(lang)
 		if len(skipped) > 0 {
 			return nil, nil, fmt.Errorf("no analyzers apply to language %q (registered: %v)", lang, skipped)

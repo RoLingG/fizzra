@@ -2,6 +2,7 @@ package service
 
 import (
 	"sync"
+	"time"
 )
 
 // ScanEvent 是一次扫描状态变化，推给前端的 SSE 事件
@@ -17,8 +18,7 @@ type ScanEvent struct {
 
 // EventHub 在进程内广播扫描事件
 //
-// 只用于界面告知，不承载数据，订阅者断了就断了，事件不重放，前端重连后以
-// 自己的首次加载为准
+// 只用于界面告知，不承载数据，订阅者断了就断了，事件不重放，前端重连后以自己的首次加载为准
 type EventHub struct {
 	mu     sync.RWMutex
 	subs   map[int]chan ScanEvent
@@ -61,7 +61,14 @@ func (h *EventHub) Publish(ev ScanEvent) {
 		select {
 		case ch <- ev:
 		default:
-			// 订阅者来不及消费，丢掉这一条而不是阻塞扫描
+			// 进度事件丢了不要紧，下一次会覆盖
+			// 结束事件丢了界面会一直停在「扫描中」，宁可等一会儿也要送进去
+			if ev.Type == "finished" {
+				select {
+				case ch <- ev:
+				case <-time.After(200 * time.Millisecond):
+				}
+			}
 		}
 	}
 }
