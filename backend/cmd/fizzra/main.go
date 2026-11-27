@@ -519,8 +519,7 @@ func cmdServe(app *App, args []string) int {
 	handler.Shutdown = ctx.Done()
 	dashboard := web.Dist()
 	if dashboard == nil {
-		// 没有仪表盘时根路径会返回一段说明页，但那要等用户打开浏览器才看得到。
-		// 部署漏跑 go generate 时，这条日志是唯一的线索
+		// 仪表盘缺失时根路径只返回说明页，启动日志是唯一的提示
 		app.Log.Warn("dashboard is not embedded; run `go generate ./...` before building to include it")
 	}
 	router := api.NewRouter(handler, api.RouterOptions{

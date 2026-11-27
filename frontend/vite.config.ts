@@ -18,11 +18,18 @@ export default defineConfig({
           if (id.includes('node_modules/echarts') || id.includes('node_modules/zrender')) {
             return 'charts'
           }
+          // Element Plus 单独成块
+          if (id.includes('node_modules/element-plus') || id.includes('node_modules/@element-plus')) {
+            return 'element-plus'
+          }
+          if (id.includes('node_modules/vue') || id.includes('node_modules/@vue')) {
+            return 'vue'
+          }
           return undefined
         },
       },
     },
-    chunkSizeWarningLimit: 900,
+    chunkSizeWarningLimit: 1200,
   },
   server: {
     port: 5173,

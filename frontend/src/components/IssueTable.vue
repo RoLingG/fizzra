@@ -6,7 +6,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import { analysisApi, issueApi, reportError } from '@/api/client'
-import type { Issue, Severity } from '@/api/types'
+import type { Issue, IssueStats, Severity } from '@/api/types'
 import { SEVERITY_ORDER, severityClass, truncate } from '@/api/format'
 import { useFormat } from '@/composables/useFormat'
 import { localizeIssueText } from '@/locales/ruleText'
@@ -29,6 +29,7 @@ const total = ref(0)
 const filters = reactive({
   severities: [] as Severity[],
   analyzers: [] as string[],
+  rules: [] as string[],
   statuses: ['open'] as string[],
   newOnly: false,
   search: '',
@@ -46,6 +47,7 @@ const filtered = computed(
   () =>
     filters.severities.length > 0 ||
     filters.analyzers.length > 0 ||
+    filters.rules.length > 0 ||
     filters.newOnly ||
     filters.search.length > 0 ||
     filters.file.length > 0 ||
@@ -59,6 +61,7 @@ async function load() {
     const result = await analysisApi.issues(props.analysisId, {
       severity: filters.severities,
       analyzer: filters.analyzers,
+      rule: filters.rules,
       status: filters.statuses,
       newOnly: filters.newOnly || undefined,
       search: filters.search || undefined,
@@ -79,6 +82,7 @@ async function load() {
 function resetFilters() {
   filters.severities = []
   filters.analyzers = []
+  filters.rules = []
   filters.statuses = ['open']
   filters.newOnly = false
   filters.search = ''
@@ -103,6 +107,8 @@ watch(
   () => [
     filters.severities,
     filters.analyzers,
+    filters.rules,
+    filters.file,
     filters.statuses,
     filters.newOnly,
     filters.orderBy,
@@ -131,6 +137,46 @@ watch(
 function openDetail(issue: Issue) {
   selected.value = issue
   drawerOpen.value = true
+  void loadDetailStats()
+}
+
+/** 抽屉里「同一规则 / 同一文件还有几条」的依据，只统计打开抽屉时取一次 */
+const detailStats = ref<IssueStats | null>(null)
+
+async function loadDetailStats() {
+  if (!props.analysisId) return
+  try {
+    detailStats.value = await analysisApi.stats(props.analysisId)
+  } catch {
+    // 聚合信息是辅助，拿不到就不显示，不影响读这一条
+    detailStats.value = null
+  }
+}
+
+/** 当前这条所属规则的命中总数，规则不在 TopRules 里时为 0 */
+const sameRuleCount = computed(() => {
+  const rule = selected.value?.rule
+  if (!rule || !detailStats.value) return 0
+  const hit = detailStats.value.topRules?.find((r) => r.rule === rule)
+  return hit ? hit.count - 1 : 0
+})
+
+/** 把列表筛到当前问题所属规则，抽屉随即关闭 */
+function filterByRule() {
+  const rule = selected.value?.rule
+  if (!rule) return
+  filters.rules = [rule]
+  filters.page = 1
+  drawerOpen.value = false
+}
+
+/** 把列表筛到当前问题所在文件，抽屉随即关闭 */
+function filterByFile() {
+  const file = selected.value?.file
+  if (!file) return
+  filters.file = file
+  filters.page = 1
+  drawerOpen.value = false
 }
 
 /** 问题是否带有修改前后对照 */
@@ -271,6 +317,22 @@ defineExpose({ reload: load })
       <el-checkbox v-model="filters.newOnly" class="new-only">{{ t('issue.newOnly') }}</el-checkbox>
 
       <el-button v-if="filtered" text @click="resetFilters">{{ t('common.reset') }}</el-button>
+
+      <div v-if="filters.rules.length || filters.file" class="active-filters">
+        <span class="active-filters-label">{{ t('issue.activeFilters') }}</span>
+        <el-tag
+          v-for="rule in filters.rules"
+          :key="`rule-${rule}`"
+          closable
+          size="small"
+          @close="filters.rules = filters.rules.filter((r) => r !== rule)"
+        >
+          {{ rule }}
+        </el-tag>
+        <el-tag v-if="filters.file" closable size="small" @close="filters.file = ''">
+          {{ filters.file }}
+        </el-tag>
+      </div>
     </div>
 
     <div class="summary muted">
@@ -386,9 +448,24 @@ defineExpose({ reload: load })
       background
     />
 
-    <el-drawer v-model="drawerOpen" size="760px" :with-header="false" direction="rtl">
+    <el-drawer
+      v-model="drawerOpen"
+      size="640px"
+      :with-header="false"
+      direction="rtl"
+      append-to-body
+      :lock-scroll="true"
+      class="issue-drawer"
+    >
       <div v-if="displaySelected" class="detail">
         <div class="detail-head">
+          <el-button
+            class="back-btn"
+            text
+            :icon="'ArrowLeft'"
+            :aria-label="t('common.back')"
+            @click="drawerOpen = false"
+          />
           <span :class="severityClass(displaySelected.severity)">
             {{ severityLabel(displaySelected.severity) }}
           </span>
@@ -420,7 +497,7 @@ defineExpose({ reload: load })
 
         <div v-if="displaySelected.advice" class="detail-block">
           <h3 class="block-title">{{ t('issue.whyThisMatters') }}</h3>
-          <p class="advice-text">{{ displaySelected.advice }}</p>
+          <p class="advice-text detail-box">{{ displaySelected.advice }}</p>
         </div>
 
         <FixSuggestion v-if="displaySelected.fix" :fix="displaySelected.fix" />
@@ -450,15 +527,29 @@ defineExpose({ reload: load })
 
         <div class="detail-block">
           <h3 class="block-title">{{ t('issue.details') }}</h3>
-          <dl class="meta">
-            <dt>{{ t('issue.detected') }}</dt>
-            <dd>{{ formatDate(displaySelected.createdAt) }}</dd>
-            <dt>{{ t('issue.statusLabel') }}</dt>
-            <dd>{{ statusLabel(displaySelected.status) }}</dd>
-            <dt>{{ t('issue.fingerprint') }}</dt>
-            <dd class="mono">{{ displaySelected.fingerprint }}</dd>
-          </dl>
+          <div class="detail-box">
+            <dl class="meta">
+              <dt>{{ t('issue.detected') }}</dt>
+              <dd>{{ formatDate(displaySelected.createdAt) }}</dd>
+              <dt>{{ t('issue.statusLabel') }}</dt>
+              <dd>{{ statusLabel(displaySelected.status) }}</dd>
+              <dt>{{ t('issue.fingerprint') }}</dt>
+              <dd class="mono">{{ displaySelected.fingerprint }}</dd>
+            </dl>
+          </div>
           <p class="muted footnote">{{ t('issue.fingerprintNote') }}</p>
+        </div>
+
+        <div v-if="sameRuleCount > 0 || displaySelected.file" class="detail-block">
+          <h3 class="block-title">{{ t('issue.related') }}</h3>
+          <div class="related detail-box">
+            <button v-if="sameRuleCount > 0" type="button" class="related-link" @click="filterByRule">
+              {{ t('issue.sameRule', { count: sameRuleCount, rule: displaySelected.rule }) }}
+            </button>
+            <button v-if="displaySelected.file" type="button" class="related-link" @click="filterByFile">
+              {{ t('issue.sameFile', { file: displaySelected.file }) }}
+            </button>
+          </div>
         </div>
 
         <div class="detail-foot">
@@ -515,6 +606,21 @@ defineExpose({ reload: load })
 
 .filter {
   width: 132px;
+}
+
+.active-filters {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-xxs);
+  padding-top: var(--s-xxs);
+}
+
+.active-filters-label {
+  font: var(--t-caption);
+  color: var(--text-muted);
+  margin-right: var(--s-xxs);
 }
 
 .summary {
@@ -632,7 +738,10 @@ defineExpose({ reload: load })
   display: flex;
   flex-direction: column;
   gap: var(--s-lg);
-  padding: 4px 2px 40px;
+  /* 撑满抽屉高度，操作栏才能被 margin-top: auto 推到底部 */
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: var(--s-xl) var(--s-lg) var(--s-lg);
 }
 
 .detail-head {
@@ -640,6 +749,12 @@ defineExpose({ reload: load })
   align-items: center;
   gap: var(--s-xs);
   flex-wrap: wrap;
+}
+
+/* 贴住内容左缘，抵消 el-button 自带的内边距，标签才和下方各区块对齐 */
+.back-btn {
+  margin-left: calc(-1 * var(--s-xs));
+  padding: 4px;
 }
 
 .rule {
@@ -658,9 +773,10 @@ defineExpose({ reload: load })
   gap: var(--s-xxs);
 }
 
+/* 小标题是给扫读用的路标，比正文略小但要有分量，否则在宽抽屉里读起来像脚注 */
 .block-title {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -669,7 +785,16 @@ defineExpose({ reload: load })
 
 .advice-text {
   margin: 0;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.detail-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--s-sm);
 }
 
 .location-row {
@@ -686,7 +811,6 @@ defineExpose({ reload: load })
 .location-row code {
   word-break: break-all;
 }
-
 .code {
   margin: 0;
   padding: var(--s-sm);
@@ -720,12 +844,38 @@ defineExpose({ reload: load })
   margin: 4px 0 0;
 }
 
-/* 用 margin-left: auto 而非 space-between：无文档链接时操作按钮仍需靠右 */
+.related {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-xxs);
+  align-items: flex-start;
+}
+
+/* 用 button 而非 a：它触发的是列表筛选，不导航，键盘也应当直接可聚焦 */
+.related-link {
+  font: var(--t-body-sm);
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.2s var(--ease-out);
+}
+
+.related-link:hover {
+  text-decoration: underline;
+}
+
+/* 贴底：内容区撑满后，操作栏被推到抽屉下沿，不受内容多少影响 */
 .detail-foot {
   display: flex;
   align-items: center;
   gap: var(--s-sm);
   flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: var(--s-md);
+  border-top: 1px solid var(--border);
 }
 
 .detail-actions {

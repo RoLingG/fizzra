@@ -61,8 +61,7 @@ func (h *EventHub) Publish(ev ScanEvent) {
 		select {
 		case ch <- ev:
 		default:
-			// 进度事件丢了不要紧，下一次会覆盖
-			// 结束事件丢了界面会一直停在「扫描中」，宁可等一会儿也要送进去
+			// 进度事件丢了会被下一次覆盖，结束事件丢了界面会一直停在「扫描中」
 			if ev.Type == "finished" {
 				select {
 				case ch <- ev:

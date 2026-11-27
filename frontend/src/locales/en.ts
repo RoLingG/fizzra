@@ -370,6 +370,10 @@ const en = {
     fingerprint: 'Fingerprint',
     fingerprintNote:
       'The fingerprint is stable across scans, so an unchanged finding is recognised even when its line number moves.',
+    related: 'Related',
+    sameRule: 'Rule {rule} has {count} more',
+    sameFile: 'Other issues in this file',
+    activeFilters: 'Filtered by:',
     ruleDocs: 'Rule documentation ↗',
     openIssuePage: 'Open the issue page',
     issueActions: 'Issue actions',
